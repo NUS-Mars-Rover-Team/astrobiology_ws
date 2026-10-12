@@ -1,0 +1,19 @@
+# Pump node parameters.  steps_per_ml must be calibrated per pump.
+# speed_us is hardcoded in serial_commands.py (pump1=30, pump2=50, pump3=200).
+# expected_s = steps * speed_us / 1_000_000, where steps = volume_ml * steps_per_ml.
+# All of these can also be changed live: ros2 param set /pump_node <name> <value>
+pump_node:
+  ros__parameters:
+    port: /dev/ttyUSB1
+    baud: 115200
+    dry_run: true                # safe default — set false when hardware is connected
+
+    pump1:
+      steps_per_ml: 1000.0      # placeholder — calibrate
+      max_volume_ml: 20.0
+    pump2:
+      steps_per_ml: 1000.0      # placeholder — calibrate
+      max_volume_ml: 20.0
+    pump3:
+      steps_per_ml: 1000.0      # placeholder — calibrate
+      max_volume_ml: 20.0

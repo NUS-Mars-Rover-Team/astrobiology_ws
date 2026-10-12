@@ -1,0 +1,10 @@
+# Run a peristaltic pump for a set volume. No flow sensor: run time = volume / calibrated flow rate.
+# Servers: /astrobiology/pump1/dispense (water into cache),
+#          /astrobiology/pump2/dispense (slurry into carousel),
+#          /astrobiology/pump3/dispense
+
+float32 volume_ml
+---
+bool    success         # accepted, not finished
+string  message         # reason if rejected
+float32 expected_s      # estimated time to finish; 0 if rejected

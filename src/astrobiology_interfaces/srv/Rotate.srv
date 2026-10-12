@@ -1,0 +1,12 @@
+# Step the carousel to bring a cuvette into view of the carousel cam and spectroscope.
+# Server: /astrobiology/carousel/rotate. Rejected unless in carousel mode.
+
+uint8 DIRECTION_CW=0
+uint8 DIRECTION_CCW=1
+
+float32 step_deg        # must be one of allowed_steps_deg in config (5, 60)
+uint8   direction
+---
+bool    success         # accepted, not finished
+string  message         # reason if rejected
+float32 expected_s      # estimated time to finish; 0 if rejected
