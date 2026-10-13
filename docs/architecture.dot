@@ -1,0 +1,201 @@
+// Astrobiology ROS 2 Architecture
+// Render: dot -Tpng architecture.dot -o architecture.png
+//     or: dot -Tsvg architecture.dot -o architecture.svg
+//     or: paste into https://dreampuf.github.io/GraphvizOnline
+
+digraph astrobiology {
+    rankdir=LR;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=11];
+    edge [fontname="Helvetica", fontsize=9];
+    bgcolor="white";
+    pad=0.5;
+    nodesep=0.6;
+    ranksep=1.2;
+
+    // ── Hardware ──────────────────────────────────────────────
+    subgraph cluster_hw {
+        label="Hardware";
+        style=dashed;
+        color="#888888";
+        fontcolor="#888888";
+
+        esp_motors [
+            label="ESP32\nMotor Controller\n(3 stepper axes)"
+            shape=box3d style=filled fillcolor="#FFE0B2"
+        ];
+        esp_pumps [
+            label="ESP32\nFastAccelStepper\n(3 peristaltic pumps)"
+            shape=box3d style=filled fillcolor="#FFE0B2"
+        ];
+        spectro_cam [
+            label="Sonix\nSpectroscope\nCamera"
+            shape=box3d style=filled fillcolor="#FFE0B2"
+        ];
+    }
+
+    // ── ROS 2 Nodes ──────────────────────────────────────────
+    subgraph cluster_nodes {
+        label="ROS 2 Nodes";
+        style=rounded;
+        color="#1565C0";
+        fontcolor="#1565C0";
+
+        motor_bridge [
+            label="motor_bridge\n(astrobiology_bringup)"
+            shape=ellipse style=filled fillcolor="#BBDEFB"
+        ];
+        pump_node [
+            label="pump_node\n(astrobiology_actuators)"
+            shape=ellipse style=filled fillcolor="#BBDEFB"
+        ];
+        spectrum_node [
+            label="spectrum_node\n(spectro_cam)"
+            shape=ellipse style=filled fillcolor="#BBDEFB"
+        ];
+        spectrum_plot [
+            label="spectrum_plot\n(diagnostic)"
+            shape=ellipse style=filled fillcolor="#E3F2FD"
+        ];
+    }
+
+    // ── Topics (publishers) ──────────────────────────────────
+    subgraph cluster_topics {
+        label="Topics";
+        style=rounded;
+        color="#2E7D32";
+        fontcolor="#2E7D32";
+
+        motor_status [
+            label="/astrobiology/\nmotor_status\n[MotorStatus]"
+            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
+        ];
+        spectrum_topic [
+            label="/spectro/\nspectrum\n[Spectrum]"
+            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
+        ];
+        preview_topic [
+            label="/spectro/preview/\ncompressed\n[CompressedImage]"
+            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
+        ];
+    }
+
+    // ── Services ─────────────────────────────────────────────
+    subgraph cluster_services {
+        label="Services";
+        style=rounded;
+        color="#6A1B9A";
+        fontcolor="#6A1B9A";
+
+        move_motor [
+            label="/astrobiology/\nmove_motor\n[MoveMotor]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+
+        pump1_dispense [
+            label="/astrobiology/\npump1/dispense\n[Dispense]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        pump2_dispense [
+            label="/astrobiology/\npump2/dispense\n[Dispense]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        pump3_dispense [
+            label="/astrobiology/\npump3/dispense\n[Dispense]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        pump1_stop [
+            label="/astrobiology/\npump1/stop\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+        pump2_stop [
+            label="/astrobiology/\npump2/stop\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+        pump3_stop [
+            label="/astrobiology/\npump3/stop\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+
+        set_zero [
+            label="/spectro/.../\nset_zero_reference\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+        clear_zero [
+            label="/spectro/.../\nclear_zero_reference\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+    }
+
+    // ── Planned (not yet implemented) ────────────────────────
+    subgraph cluster_planned {
+        label="Planned (not yet implemented)";
+        style=dashed;
+        color="#BDBDBD";
+        fontcolor="#9E9E9E";
+
+        gantry_move [
+            label="/astrobiology/\n{x,y,z}_gantry/move\n[MoveAxis]"
+            shape=hexagon style="filled,dashed" fillcolor="#F5F5F5" color="#BDBDBD"
+        ];
+        gantry_home [
+            label="/astrobiology/\n{x,y,z}_gantry/home\n[Command]"
+            shape=hexagon style="filled,dashed" fillcolor="#F5F5F5" color="#BDBDBD"
+        ];
+        centrifuge_spin [
+            label="/astrobiology/\ncentrifuge/spin\n[Spin]"
+            shape=hexagon style="filled,dashed" fillcolor="#F5F5F5" color="#BDBDBD"
+        ];
+        carousel_rotate [
+            label="/astrobiology/\ncarousel/rotate\n[Rotate]"
+            shape=hexagon style="filled,dashed" fillcolor="#F5F5F5" color="#BDBDBD"
+        ];
+        carousel_mode [
+            label="/astrobiology/\ncarousel/set_mode\n[SetCarouselMode]"
+            shape=hexagon style="filled,dashed" fillcolor="#F5F5F5" color="#BDBDBD"
+        ];
+    }
+
+    // ── Edges: hardware → nodes ──────────────────────────────
+    esp_motors  -> motor_bridge   [label="serial\n/dev/ttyUSB0\n115200" style=bold color="#E65100"];
+    esp_pumps   -> pump_node      [label="serial\n/dev/ttyUSB1\n115200" style=bold color="#E65100"];
+    spectro_cam -> spectrum_node  [label="V4L2\n/dev/spectroscope" style=bold color="#E65100"];
+
+    // ── Edges: nodes → topics ────────────────────────────────
+    motor_bridge  -> motor_status   [label="pub\n5 Hz" color="#2E7D32"];
+    spectrum_node -> spectrum_topic [label="pub" color="#2E7D32"];
+    spectrum_node -> preview_topic  [label="pub" color="#2E7D32"];
+
+    // ── Edges: topics → subscribers ──────────────────────────
+    spectrum_topic -> spectrum_plot [label="sub" color="#2E7D32" style=dashed];
+
+    // ── Edges: nodes → services ──────────────────────────────
+    motor_bridge  -> move_motor     [label="server" color="#6A1B9A"];
+
+    pump_node -> pump1_dispense [label="server" color="#6A1B9A"];
+    pump_node -> pump2_dispense [label="server" color="#6A1B9A"];
+    pump_node -> pump3_dispense [label="server" color="#6A1B9A"];
+    pump_node -> pump1_stop     [label="server" color="#6A1B9A"];
+    pump_node -> pump2_stop     [label="server" color="#6A1B9A"];
+    pump_node -> pump3_stop     [label="server" color="#6A1B9A"];
+
+    spectrum_node -> set_zero   [label="server" color="#6A1B9A"];
+    spectrum_node -> clear_zero [label="server" color="#6A1B9A"];
+
+    // ── Legend ────────────────────────────────────────────────
+    subgraph cluster_legend {
+        label="Legend";
+        style=rounded;
+        color="#424242";
+        fontcolor="#424242";
+        fontsize=10;
+
+        leg_hw   [label="Hardware"  shape=box3d     style=filled fillcolor="#FFE0B2" fontsize=9];
+        leg_node [label="ROS Node"  shape=ellipse   style=filled fillcolor="#BBDEFB" fontsize=9];
+        leg_topic[label="Topic"     shape=rectangle style="filled,rounded" fillcolor="#C8E6C9" fontsize=9];
+        leg_srv  [label="Service"   shape=hexagon   style=filled fillcolor="#E1BEE7" fontsize=9];
+        leg_plan [label="Planned"   shape=hexagon   style="filled,dashed" fillcolor="#F5F5F5" color="#BDBDBD" fontsize=9];
+
+        leg_hw -> leg_node -> leg_topic -> leg_srv -> leg_plan [style=invis];
+    }
+}
