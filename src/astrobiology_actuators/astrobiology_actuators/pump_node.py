@@ -1,4 +1,9 @@
-"""ROS 2 node bridging pump dispense/stop services to the pump ESP32 over serial."""
+"""ROS 2 node bridging pump dispense/stop services to the pump ESP32 over serial.
+
+The ESP32 runs FastAccelStepper firmware accepting line-based commands:
+    speed <steps/s>   accel <steps/s^2>   dir cw|ccw
+    time <seconds>    run   stop   estop
+"""
 
 import threading
 import time
@@ -12,9 +17,7 @@ from std_srvs.srv import Trigger
 
 from astrobiology_actuators.pump import PumpConfig, PumpState
 from astrobiology_actuators.serial_commands import (
-    PUMP_PROFILES,
-    dispense_command,
-    stop_all_command,
+    dispense_commands,
     stop_command,
 )
 
@@ -31,18 +34,22 @@ class PumpNode(Node):
         self.declare_parameter('baud', 115200)
         self.declare_parameter('dry_run', False)
         for pid in PUMP_IDS:
+            self.declare_parameter(f'pump{pid}.speed_steps_s', 5000)
+            self.declare_parameter(f'pump{pid}.accel_steps_s2', 400)
+            self.declare_parameter(f'pump{pid}.direction', 'cw')
             self.declare_parameter(f'pump{pid}.steps_per_ml', 1000.0)
             self.declare_parameter(f'pump{pid}.max_volume_ml', 20.0)
 
         self._dry_run = self.get_parameter('dry_run').value
 
-        # Build pump states from config; speed_us comes from the serial_commands table
+        # Build pump states from config
         self._pumps = {}
         for pid in PUMP_IDS:
-            _, _, speed_us = PUMP_PROFILES[pid]
             config = PumpConfig(
                 pump_id=pid,
-                speed_us=speed_us,
+                speed_steps_s=self.get_parameter(f'pump{pid}.speed_steps_s').value,
+                accel_steps_s2=self.get_parameter(f'pump{pid}.accel_steps_s2').value,
+                direction=self.get_parameter(f'pump{pid}.direction').value,
                 steps_per_ml=self.get_parameter(f'pump{pid}.steps_per_ml').value,
                 max_volume_ml=self.get_parameter(f'pump{pid}.max_volume_ml').value,
             )
@@ -121,12 +128,15 @@ class PumpNode(Node):
                 return resp
 
             pump = self._pumps[pump_id]
-            success, message, expected_s, steps = pump.dispense(req.volume_ml, now)
+            success, message, expected_s = pump.dispense(req.volume_ml, now)
 
         if success:
-            cmd = dispense_command(pump_id, steps)
-            self._send_serial(cmd)
-            self.get_logger().info(f'pump{pump_id}: {message} (cmd: {cmd})')
+            cfg = pump.config
+            cmds = dispense_commands(
+                cfg.speed_steps_s, cfg.accel_steps_s2, cfg.direction, expected_s,
+            )
+            self._send_serial_sequence(cmds)
+            self.get_logger().info(f'pump{pump_id}: {message}')
         else:
             self.get_logger().warn(f'pump{pump_id}: rejected: {message}')
 
@@ -140,9 +150,8 @@ class PumpNode(Node):
             pump = self._pumps[pump_id]
             success, message = pump.stop()
 
-        cmd = stop_command(pump_id)
-        self._send_serial(cmd)
-        self.get_logger().info(f'pump{pump_id}: {message} (cmd: {cmd})')
+        self._send_serial(stop_command())
+        self.get_logger().info(f'pump{pump_id}: {message}')
 
         resp.success = success
         resp.message = message
@@ -152,11 +161,22 @@ class PumpNode(Node):
 
     def _send_serial(self, cmd):
         if self._dry_run:
-            self.get_logger().info(f'[dry_run] would send: {cmd}')
+            self.get_logger().info(f'[dry_run] {cmd}')
             return
         if self._ser:
             with self._lock:
                 self._ser.write((cmd + '\n').encode())
+
+    def _send_serial_sequence(self, cmds):
+        """Send a list of commands, one per line."""
+        if self._dry_run:
+            for cmd in cmds:
+                self.get_logger().info(f'[dry_run] {cmd}')
+            return
+        if self._ser:
+            with self._lock:
+                for cmd in cmds:
+                    self._ser.write((cmd + '\n').encode())
 
     def _read_loop(self):
         import serial as pyserial
@@ -171,19 +191,12 @@ class PumpNode(Node):
             if not line:
                 continue
             self.get_logger().info(f'esp: {line}')
-            # Parse "Motor N done." to mark pump complete early
-            if line.startswith('Motor ') and line.endswith(' done.'):
-                try:
-                    motor_id = int(line.split()[1])
-                    with self._lock:
-                        if motor_id in self._pumps:
-                            self._pumps[motor_id].complete()
-                except (ValueError, IndexError):
-                    pass
-            elif 'stopped' in line:
+            # "Stopped.", "Stopped after N legs.", or "EMERGENCY STOP"
+            if line.startswith('Stopped') or line == 'EMERGENCY STOP':
                 with self._lock:
                     for pump in self._pumps.values():
-                        pump.complete()
+                        if pump.is_busy:
+                            pump.complete()
 
     # -- Timer ---------------------------------------------------------------
 
@@ -206,7 +219,7 @@ def main(args=None):
         pass
     finally:
         if node._ser:
-            node._ser.write(b'x\n')    # disable motors on shutdown
+            node._ser.write(b'estop\n')  # emergency stop on shutdown
             node._ser.close()
         node.destroy_node()
         rclpy.shutdown()

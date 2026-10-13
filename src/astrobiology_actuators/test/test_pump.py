@@ -5,8 +5,11 @@ from astrobiology_actuators.pump import PumpConfig, PumpState, State
 
 @pytest.fixture
 def config():
-    # speed_us=200 (pump3), steps_per_ml=1000 → 1 ml = 1000 steps = 0.2s
-    return PumpConfig(pump_id=3, speed_us=200, steps_per_ml=1000.0, max_volume_ml=20.0)
+    # speed=5000 steps/s, steps_per_ml=1000 → 1 ml = 1000/5000 = 0.2 s
+    return PumpConfig(
+        pump_id=3, speed_steps_s=5000, accel_steps_s2=400,
+        direction='cw', steps_per_ml=1000.0, max_volume_ml=20.0,
+    )
 
 
 @pytest.fixture
@@ -17,36 +20,35 @@ def pump(config):
 # -- Dispense success --------------------------------------------------------
 
 def test_dispense_success(pump):
-    ok, msg, expected_s, steps = pump.dispense(5.0, now=0.0)
+    ok, msg, expected_s = pump.dispense(5.0, now=0.0)
     assert ok is True
-    assert steps == 5000
-    # 5000 steps * 200 us / 1_000_000 = 1.0 s
+    # 5 ml * 1000 steps/ml / 5000 steps/s = 1.0 s
     assert expected_s == pytest.approx(1.0)
     assert pump.is_busy
 
 
 def test_dispense_expected_s(pump):
-    ok, _, expected_s, _ = pump.dispense(10.0, now=0.0)
+    ok, _, expected_s = pump.dispense(10.0, now=0.0)
     assert ok is True
-    # 10000 steps * 200 us / 1_000_000 = 2.0 s
+    # 10 ml * 1000 / 5000 = 2.0 s
     assert expected_s == pytest.approx(2.0)
 
 
 # -- Dispense rejection: volume out of range ---------------------------------
 
 def test_dispense_zero_volume(pump):
-    ok, msg, _, _ = pump.dispense(0.0, now=0.0)
+    ok, msg, _ = pump.dispense(0.0, now=0.0)
     assert ok is False
     assert 'out of range' in msg
 
 
 def test_dispense_negative_volume(pump):
-    ok, msg, _, _ = pump.dispense(-1.0, now=0.0)
+    ok, msg, _ = pump.dispense(-1.0, now=0.0)
     assert ok is False
 
 
 def test_dispense_over_max(pump):
-    ok, msg, _, _ = pump.dispense(25.0, now=0.0)
+    ok, msg, _ = pump.dispense(25.0, now=0.0)
     assert ok is False
     assert 'out of range' in msg
 
@@ -55,7 +57,7 @@ def test_dispense_over_max(pump):
 
 def test_dispense_busy_self(pump):
     pump.dispense(5.0, now=0.0)
-    ok, msg, _, _ = pump.dispense(1.0, now=0.5)
+    ok, msg, _ = pump.dispense(1.0, now=0.5)
     assert ok is False
     assert 'busy' in msg
 
@@ -65,10 +67,14 @@ def test_dispense_rejects_when_another_pump_busy():
 
     This test verifies the pattern: check any(p.is_busy) before calling dispense.
     """
-    cfg = PumpConfig(pump_id=1, speed_us=30, steps_per_ml=1000.0, max_volume_ml=20.0)
-    pump1 = PumpState(cfg)
-    cfg3 = PumpConfig(pump_id=3, speed_us=200, steps_per_ml=1000.0, max_volume_ml=20.0)
-    pump3 = PumpState(cfg3)
+    pump1 = PumpState(PumpConfig(
+        pump_id=1, speed_steps_s=33333, accel_steps_s2=400,
+        direction='cw', steps_per_ml=1000.0, max_volume_ml=20.0,
+    ))
+    pump3 = PumpState(PumpConfig(
+        pump_id=3, speed_steps_s=5000, accel_steps_s2=400,
+        direction='cw', steps_per_ml=1000.0, max_volume_ml=20.0,
+    ))
 
     pump1.dispense(5.0, now=0.0)
     assert pump1.is_busy
@@ -127,12 +133,12 @@ def test_complete_when_idle(pump):
 def test_dispense_after_stop(pump):
     pump.dispense(5.0, now=0.0)
     pump.stop()
-    ok, _, _, _ = pump.dispense(3.0, now=1.0)
+    ok, _, _ = pump.dispense(3.0, now=1.0)
     assert ok is True
 
 
 def test_dispense_after_complete(pump):
     pump.dispense(5.0, now=0.0)
     pump.complete()
-    ok, _, _, _ = pump.dispense(3.0, now=1.0)
+    ok, _, _ = pump.dispense(3.0, now=1.0)
     assert ok is True

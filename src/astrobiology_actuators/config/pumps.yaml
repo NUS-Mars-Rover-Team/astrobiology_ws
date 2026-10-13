@@ -1,7 +1,7 @@
-# Pump node parameters.  steps_per_ml must be calibrated per pump.
-# speed_us is hardcoded in serial_commands.py (pump1=30, pump2=50, pump3=200).
-# expected_s = steps * speed_us / 1_000_000, where steps = volume_ml * steps_per_ml.
-# All of these can also be changed live: ros2 param set /pump_node <name> <value>
+# Pump node parameters.
+# The ESP32 firmware uses FastAccelStepper: speed in steps/s, accel in steps/s².
+# Dispense time = volume_ml * steps_per_ml / speed_steps_s.
+# steps_per_ml must be calibrated per pump.
 pump_node:
   ros__parameters:
     port: /dev/ttyUSB1
@@ -9,11 +9,20 @@ pump_node:
     dry_run: true                # safe default — set false when hardware is connected
 
     pump1:
+      speed_steps_s: 33333      # ~1/30µs per step
+      accel_steps_s2: 400
+      direction: cw
       steps_per_ml: 1000.0      # placeholder — calibrate
       max_volume_ml: 20.0
     pump2:
+      speed_steps_s: 20000      # ~1/50µs per step
+      accel_steps_s2: 400
+      direction: cw
       steps_per_ml: 1000.0      # placeholder — calibrate
       max_volume_ml: 20.0
     pump3:
+      speed_steps_s: 5000       # ~1/200µs per step
+      accel_steps_s2: 400
+      direction: cw
       steps_per_ml: 1000.0      # placeholder — calibrate
       max_volume_ml: 20.0
