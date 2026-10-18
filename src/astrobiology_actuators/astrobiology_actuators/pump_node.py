@@ -21,7 +21,7 @@ from astrobiology_actuators.serial_commands import (
     stop_command,
 )
 
-MOTORS = ['pump', 'flush']
+MOTORS = ['p', 'f']
 
 # Firmware feedback patterns
 _DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
