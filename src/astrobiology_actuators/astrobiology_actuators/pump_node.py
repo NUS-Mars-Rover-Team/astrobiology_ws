@@ -1,27 +1,33 @@
-"""ROS 2 node bridging pump dispense/stop services to the pump ESP32 over serial.
+"""ROS 2 node bridging pump services to the ESP32 over serial.
 
-The ESP32 runs FastAccelStepper firmware accepting line-based commands:
-    speed <steps/s>   accel <steps/s^2>   dir cw|ccw
-    time <seconds>    run   stop   estop
+Services use StepperMove: the caller passes steps, speed_hz, accel_hz2
+which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
 """
 
+import re
 import threading
 import time
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
-
-from astrobiology_interfaces.srv import Dispense
 from std_srvs.srv import Trigger
 
-from astrobiology_actuators.pump import PumpConfig, PumpState
+from astrobiology_interfaces.srv import StepperMove
+
 from astrobiology_actuators.serial_commands import (
-    dispense_commands,
+    estop_command,
+    move_command,
     stop_command,
 )
 
-PUMP_IDS = [1, 2, 3]
+# Firmware feedback patterns
+_DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
+_STOPPED_RE = re.compile(r'^stopped\s+(\S+)\s+steps=(-?\d+)')
+_CANCEL_RE = re.compile(r'^cancelled\s+(\S+)')
+_ABORT_RE = re.compile(r'^aborted\s+(\S+)')
+_OK_RE = re.compile(r'^ok\s+(\S+)\s+accepted')
+_ERR_BUSY_RE = re.compile(r'^error\s+busy:\s*(\S+)')
 
 
 class PumpNode(Node):
@@ -33,27 +39,11 @@ class PumpNode(Node):
         self.declare_parameter('port', '/dev/ttyUSB1')
         self.declare_parameter('baud', 115200)
         self.declare_parameter('dry_run', False)
-        for pid in PUMP_IDS:
-            self.declare_parameter(f'pump{pid}.speed_steps_s', 5000)
-            self.declare_parameter(f'pump{pid}.accel_steps_s2', 400)
-            self.declare_parameter(f'pump{pid}.direction', 'cw')
-            self.declare_parameter(f'pump{pid}.steps_per_ml', 1000.0)
-            self.declare_parameter(f'pump{pid}.max_volume_ml', 20.0)
+        self.declare_parameter('motor_name', 'pump')
 
         self._dry_run = self.get_parameter('dry_run').value
-
-        # Build pump states from config
-        self._pumps = {}
-        for pid in PUMP_IDS:
-            config = PumpConfig(
-                pump_id=pid,
-                speed_steps_s=self.get_parameter(f'pump{pid}.speed_steps_s').value,
-                accel_steps_s2=self.get_parameter(f'pump{pid}.accel_steps_s2').value,
-                direction=self.get_parameter(f'pump{pid}.direction').value,
-                steps_per_ml=self.get_parameter(f'pump{pid}.steps_per_ml').value,
-                max_volume_ml=self.get_parameter(f'pump{pid}.max_volume_ml').value,
-            )
-            self._pumps[pid] = PumpState(config)
+        self._motor_name = self.get_parameter('motor_name').value
+        self._busy = False
 
         # Serial port
         self._lock = threading.Lock()
@@ -65,22 +55,14 @@ class PumpNode(Node):
 
         # Services
         cb = ReentrantCallbackGroup()
-        for pid in PUMP_IDS:
-            self.create_service(
-                Dispense,
-                f'astrobiology/pump{pid}/dispense',
-                lambda req, resp, p=pid: self._on_dispense(req, resp, p),
-                callback_group=cb,
-            )
-            self.create_service(
-                Trigger,
-                f'astrobiology/pump{pid}/stop',
-                lambda req, resp, p=pid: self._on_stop(req, resp, p),
-                callback_group=cb,
-            )
-
-        # Tick timer at 5 Hz
-        self.create_timer(0.2, self._tick, callback_group=cb)
+        self.create_service(
+            StepperMove, 'astrobiology/pump1/move',
+            self._on_move, callback_group=cb,
+        )
+        self.create_service(
+            Trigger, 'astrobiology/pump1/stop',
+            self._on_stop, callback_group=cb,
+        )
 
         # Background serial read thread
         if self._ser:
@@ -101,9 +83,9 @@ class PumpNode(Node):
         baud = self.get_parameter('baud').value
         try:
             self._ser = serial.Serial(port, baud, timeout=0.5)
-            time.sleep(2.0)             # ESP32 resets on port open
+            time.sleep(2.0)
             self._ser.reset_input_buffer()
-            self._ser.write(b'\n')      # flush any partial line in firmware
+            self._ser.write(b'\n')
             self._connected = True
             self.get_logger().info(f'Connected to {port}')
         except serial.SerialException as e:
@@ -112,49 +94,29 @@ class PumpNode(Node):
 
     # -- Service callbacks ---------------------------------------------------
 
-    def _on_dispense(self, req, resp, pump_id):
-        now = time.monotonic()
+    def _on_move(self, req, resp):
         with self._lock:
-            # Shared-busy: only one pump at a time on the shared ESP32
-            other_busy = any(
-                p.is_busy for pid, p in self._pumps.items() if pid != pump_id
-            )
-            if other_busy:
+            if self._busy:
                 resp.success = False
                 resp.message = 'busy'
-                resp.expected_s = 0.0
-                self.get_logger().warn(
-                    f'pump{pump_id}: rejected (another pump is busy)')
                 return resp
+            self._busy = True
 
-            pump = self._pumps[pump_id]
-            success, message, expected_s = pump.dispense(req.volume_ml, now)
+        cmd = move_command(self._motor_name, req.steps, req.speed_hz, req.accel_hz2)
+        self._send_serial(cmd)
+        self.get_logger().info(cmd)
 
-        if success:
-            cfg = pump.config
-            cmds = dispense_commands(
-                cfg.speed_steps_s, cfg.accel_steps_s2, cfg.direction, expected_s,
-            )
-            self._send_serial_sequence(cmds)
-            self.get_logger().info(f'pump{pump_id}: {message}')
-        else:
-            self.get_logger().warn(f'pump{pump_id}: rejected: {message}')
-
-        resp.success = success
-        resp.message = message
-        resp.expected_s = expected_s
+        resp.success = True
+        resp.message = cmd
         return resp
 
-    def _on_stop(self, req, resp, pump_id):
+    def _on_stop(self, req, resp):
+        self._send_serial(stop_command(self._motor_name))
         with self._lock:
-            pump = self._pumps[pump_id]
-            success, message = pump.stop()
-
-        self._send_serial(stop_command())
-        self.get_logger().info(f'pump{pump_id}: {message}')
-
-        resp.success = success
-        resp.message = message
+            self._busy = False
+        self.get_logger().info(f'stop {self._motor_name}')
+        resp.success = True
+        resp.message = f'stop {self._motor_name}'
         return resp
 
     # -- Serial I/O ----------------------------------------------------------
@@ -166,17 +128,6 @@ class PumpNode(Node):
         if self._ser:
             with self._lock:
                 self._ser.write((cmd + '\n').encode())
-
-    def _send_serial_sequence(self, cmds):
-        """Send a list of commands, one per line."""
-        if self._dry_run:
-            for cmd in cmds:
-                self.get_logger().info(f'[dry_run] {cmd}')
-            return
-        if self._ser:
-            with self._lock:
-                for cmd in cmds:
-                    self._ser.write((cmd + '\n').encode())
 
     def _read_loop(self):
         import serial as pyserial
@@ -190,21 +141,50 @@ class PumpNode(Node):
                 return
             if not line:
                 continue
-            self.get_logger().info(f'esp: {line}')
-            # "Stopped.", "Stopped after N legs.", or "EMERGENCY STOP"
-            if line.startswith('Stopped') or line == 'EMERGENCY STOP':
+
+            m = _DONE_RE.match(line)
+            if m:
                 with self._lock:
-                    for pump in self._pumps.values():
-                        if pump.is_busy:
-                            pump.complete()
+                    self._busy = False
+                self.get_logger().info(f'done {m.group(1)} steps={m.group(2)}')
+                continue
 
-    # -- Timer ---------------------------------------------------------------
+            m = _STOPPED_RE.match(line)
+            if m:
+                with self._lock:
+                    self._busy = False
+                self.get_logger().info(f'stopped {m.group(1)} steps={m.group(2)}')
+                continue
 
-    def _tick(self):
-        now = time.monotonic()
-        with self._lock:
-            for pump in self._pumps.values():
-                pump.tick(now)
+            m = _CANCEL_RE.match(line)
+            if m:
+                with self._lock:
+                    self._busy = False
+                self.get_logger().info(f'cancelled {m.group(1)}')
+                continue
+
+            m = _ABORT_RE.match(line)
+            if m:
+                with self._lock:
+                    self._busy = False
+                self.get_logger().warn(
+                    f'aborted {m.group(1)}; physical position may be lost')
+                continue
+
+            m = _OK_RE.match(line)
+            if m:
+                self.get_logger().debug(f'{m.group(1)} accepted')
+                continue
+
+            m = _ERR_BUSY_RE.match(line)
+            if m:
+                self.get_logger().error(f'firmware busy: {m.group(1)}')
+                continue
+
+            if line.startswith('error'):
+                self.get_logger().error(f'esp: {line}')
+            else:
+                self.get_logger().info(f'esp: {line}')
 
 
 def main(args=None):
@@ -219,7 +199,7 @@ def main(args=None):
         pass
     finally:
         if node._ser:
-            node._ser.write(b'estop\n')  # emergency stop on shutdown
+            node._ser.write(b'estop\n')
             node._ser.close()
         node.destroy_node()
         rclpy.shutdown()

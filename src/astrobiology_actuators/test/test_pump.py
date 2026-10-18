@@ -1,13 +1,13 @@
 import pytest
 
-from astrobiology_actuators.pump import PumpConfig, PumpState, State
+from astrobiology_actuators.pump import PumpConfig, PumpState, State, SAFETY_TIMEOUT_MARGIN_S
 
 
 @pytest.fixture
 def config():
-    # speed=5000 steps/s, steps_per_ml=1000 → 1 ml = 1000/5000 = 0.2 s
+    # speed=5000 steps/s, steps_per_ml=1000 → 1 ml = 1000 steps
     return PumpConfig(
-        pump_id=3, speed_steps_s=5000, accel_steps_s2=400,
+        pump_id=1, motor_name='pump', speed_steps_s=5000, accel_steps_s2=400,
         direction='cw', steps_per_ml=1000.0, max_volume_ml=20.0,
     )
 
@@ -32,6 +32,36 @@ def test_dispense_expected_s(pump):
     assert ok is True
     # 10 ml * 1000 / 5000 = 2.0 s
     assert expected_s == pytest.approx(2.0)
+
+
+def test_dispense_computes_steps(pump):
+    pump.dispense(5.0, now=0.0)
+    # 5 ml * 1000 steps/ml = 5000 steps, cw = positive
+    assert pump.commanded_steps == 5000
+
+
+def test_dispense_ccw_negative_steps():
+    cfg = PumpConfig(
+        pump_id=1, motor_name='pump', speed_steps_s=5000, accel_steps_s2=400,
+        direction='ccw', steps_per_ml=1000.0, max_volume_ml=20.0,
+    )
+    p = PumpState(cfg)
+    p.dispense(3.0, now=0.0)
+    assert p.commanded_steps == -3000
+
+
+# -- Direction sign ----------------------------------------------------------
+
+def test_direction_sign_cw(config):
+    assert config.direction_sign == 1
+
+
+def test_direction_sign_ccw():
+    cfg = PumpConfig(
+        pump_id=1, motor_name='pump', speed_steps_s=5000, accel_steps_s2=400,
+        direction='ccw', steps_per_ml=1000.0, max_volume_ml=20.0,
+    )
+    assert cfg.direction_sign == -1
 
 
 # -- Dispense rejection: volume out of range ---------------------------------
@@ -62,35 +92,14 @@ def test_dispense_busy_self(pump):
     assert 'busy' in msg
 
 
-def test_dispense_rejects_when_another_pump_busy():
-    """The node enforces the shared-busy constraint, not PumpState itself.
-
-    This test verifies the pattern: check any(p.is_busy) before calling dispense.
-    """
-    pump1 = PumpState(PumpConfig(
-        pump_id=1, speed_steps_s=33333, accel_steps_s2=400,
-        direction='cw', steps_per_ml=1000.0, max_volume_ml=20.0,
-    ))
-    pump3 = PumpState(PumpConfig(
-        pump_id=3, speed_steps_s=5000, accel_steps_s2=400,
-        direction='cw', steps_per_ml=1000.0, max_volume_ml=20.0,
-    ))
-
-    pump1.dispense(5.0, now=0.0)
-    assert pump1.is_busy
-
-    # The node would check this before calling pump3.dispense()
-    other_busy = any(p.is_busy for p in [pump1, pump3] if p is not pump3)
-    assert other_busy is True
-
-
-# -- Timer-based completion --------------------------------------------------
+# -- Timer-based safety timeout ----------------------------------------------
 
 def test_tick_completes(pump):
-    pump.dispense(5.0, now=0.0)  # expected_s = 1.0
-    pump.tick(now=0.9)
+    pump.dispense(5.0, now=0.0)  # expected_s = 1.0, timeout = 1.0 + margin
+    timeout = 1.0 + SAFETY_TIMEOUT_MARGIN_S
+    pump.tick(now=timeout - 0.1)
     assert pump.is_busy
-    pump.tick(now=1.0)
+    pump.tick(now=timeout)
     assert not pump.is_busy
 
 
@@ -107,6 +116,7 @@ def test_stop_while_dispensing(pump):
     assert ok is True
     assert 'stopped' in msg
     assert not pump.is_busy
+    assert pump.commanded_steps == 0
 
 
 def test_stop_while_idle(pump):
@@ -121,6 +131,7 @@ def test_complete(pump):
     pump.dispense(5.0, now=0.0)
     pump.complete()
     assert not pump.is_busy
+    assert pump.commanded_steps == 0
 
 
 def test_complete_when_idle(pump):

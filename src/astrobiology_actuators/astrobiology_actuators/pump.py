@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 
+SAFETY_TIMEOUT_MARGIN_S = 2.0
+
 
 class State(Enum):
     IDLE = auto()
@@ -12,11 +14,17 @@ class State(Enum):
 @dataclass
 class PumpConfig:
     pump_id: int
+    motor_name: str         # firmware motor name (e.g. 'pump', 'flush')
     speed_steps_s: int      # motor speed in steps/s (from YAML)
     accel_steps_s2: int     # acceleration in steps/s² (from YAML)
     direction: str          # 'cw' or 'ccw' (from YAML)
-    steps_per_ml: float     # for converting volume_ml -> run time (calibrate)
+    steps_per_ml: float     # for converting volume_ml -> step count (calibrate)
     max_volume_ml: float
+
+    @property
+    def direction_sign(self):
+        """Return +1 for 'cw', -1 for 'ccw'."""
+        return 1 if self.direction == 'cw' else -1
 
 
 class PumpState:
@@ -29,15 +37,14 @@ class PumpState:
         self.config = config
         self.state = State.IDLE
         self._finish_time = 0.0
+        self._commanded_steps = 0
 
     def dispense(self, volume_ml, now):
         """Try to start a dispense.
 
         Returns (success, message, expected_s).
-        The caller must check the shared-busy constraint across all pumps
-        *before* calling this method.  On success the caller reads
-        config.speed_steps_s / accel_steps_s2 / direction and expected_s
-        to build the serial commands.
+        On success the caller reads commanded_steps, config.speed_steps_s,
+        and config.accel_steps_s2 to build the g1 serial command.
         """
         if self.state == State.DISPENSING:
             return (False, 'busy', 0.0)
@@ -46,31 +53,41 @@ class PumpState:
         if volume_ml > self.config.max_volume_ml:
             return (False, 'out of range', 0.0)
 
-        # time_s = volume * (steps/ml) / (steps/s)
-        time_s = volume_ml * self.config.steps_per_ml / self.config.speed_steps_s
-        if time_s <= 0.0:
+        steps = int(round(volume_ml * self.config.steps_per_ml))
+        if steps <= 0:
             return (False, 'out of range', 0.0)
 
+        self._commanded_steps = self.config.direction_sign * steps
+
+        # Estimate run time (ignoring accel/decel ramps)
+        time_s = steps / self.config.speed_steps_s
+
         self.state = State.DISPENSING
-        self._finish_time = now + time_s
-        return (True, f'dispensing {volume_ml:.2f} ml ({time_s:.3f} s)', time_s)
+        self._finish_time = now + time_s + SAFETY_TIMEOUT_MARGIN_S
+        return (True, f'dispensing {volume_ml:.2f} ml ({steps} steps)', time_s)
 
     def stop(self):
         """Force-stop.  Always succeeds."""
         was_busy = self.state == State.DISPENSING
         self.state = State.IDLE
         self._finish_time = 0.0
+        self._commanded_steps = 0
         return (True, 'stopped' if was_busy else 'already idle')
 
     def complete(self):
-        """Hardware reported completion ("Stopped." / "EMERGENCY STOP")."""
+        """Hardware reported completion (firmware 'done' / 'stopped')."""
         self.state = State.IDLE
         self._finish_time = 0.0
+        self._commanded_steps = 0
 
     def tick(self, now):
-        """Advance timer-based completion.  Call periodically."""
+        """Safety timeout.  Call periodically."""
         if self.state == State.DISPENSING and now >= self._finish_time:
             self.state = State.IDLE
+
+    @property
+    def commanded_steps(self):
+        return self._commanded_steps
 
     @property
     def is_busy(self):

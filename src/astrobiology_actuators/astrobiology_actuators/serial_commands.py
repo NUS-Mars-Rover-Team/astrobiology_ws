@@ -1,30 +1,24 @@
-"""Serial command strings for the pump ESP32 (FastAccelStepper firmware).  No ROS imports.
+"""Serial command strings for the ESP32 stepper controller.  No ROS imports.
 
 The ESP32 accepts line-based commands:
-    speed <steps/s>   accel <steps/s^2>   dir cw|ccw
-    time <seconds>    run   stop   estop
-A dispense is a sequence: set speed, accel, direction, time, then run.
+    g1 <motor> <signed_steps> <speed_hz> <accel_hz2>
+    stop <motor|all>   estop [motor|all]
+    enable <motor|all> on|off   status [motor|all]   zero <motor|all>
 
-# TODO(firmware): add motor ID prefix when firmware supports 3 motors.
+Motor IDs: pump (p), centrifuge (c), flush (f), x, y, z.
 """
 
 
-def dispense_commands(speed_steps_s, accel_steps_s2, direction, time_s):
-    """Return the list of serial commands to start a timed dispense."""
-    return [
-        f'speed {speed_steps_s}',
-        f'accel {accel_steps_s2}',
-        f'dir {direction}',
-        f'time {time_s:.4f}',
-        'run',
-    ]
+def move_command(motor_name, steps, speed_hz, accel_hz2):
+    """Build a G1 move command.  Steps are signed (positive = forward)."""
+    return f'g1 {motor_name} {steps} {speed_hz} {accel_hz2}'
 
 
-def stop_command():
-    """Smooth deceleration stop."""
-    return 'stop'
+def stop_command(motor_name):
+    """Smooth deceleration stop for a specific motor."""
+    return f'stop {motor_name}'
 
 
 def estop_command():
-    """Emergency stop (no deceleration)."""
+    """Emergency stop all motors."""
     return 'estop'
