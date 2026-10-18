@@ -1,4 +1,4 @@
-"""ROS 2 node bridging pump services to the ESP32 over serial.
+"""ROS 2 node bridging stepper move/stop services to the ESP32 over serial.
 
 Services use StepperMove: the caller passes steps, speed_hz, accel_hz2
 which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
@@ -21,6 +21,8 @@ from astrobiology_actuators.serial_commands import (
     stop_command,
 )
 
+MOTORS = ['pump', 'flush']
+
 # Firmware feedback patterns
 _DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
 _STOPPED_RE = re.compile(r'^stopped\s+(\S+)\s+steps=(-?\d+)')
@@ -39,11 +41,9 @@ class PumpNode(Node):
         self.declare_parameter('port', '/dev/ttyUSB1')
         self.declare_parameter('baud', 115200)
         self.declare_parameter('dry_run', False)
-        self.declare_parameter('motor_name', 'pump')
 
         self._dry_run = self.get_parameter('dry_run').value
-        self._motor_name = self.get_parameter('motor_name').value
-        self._busy = False
+        self._busy = {name: False for name in MOTORS}
 
         # Serial port
         self._lock = threading.Lock()
@@ -53,23 +53,27 @@ class PumpNode(Node):
         if not self._dry_run:
             self._open_serial()
 
-        # Services
+        # Services — one move + stop pair per motor
         cb = ReentrantCallbackGroup()
-        self.create_service(
-            StepperMove, 'astrobiology/pump1/move',
-            self._on_move, callback_group=cb,
-        )
-        self.create_service(
-            Trigger, 'astrobiology/pump1/stop',
-            self._on_stop, callback_group=cb,
-        )
+        for name in MOTORS:
+            self.create_service(
+                StepperMove, f'astrobiology/{name}/move',
+                lambda req, resp, n=name: self._on_move(req, resp, n),
+                callback_group=cb,
+            )
+            self.create_service(
+                Trigger, f'astrobiology/{name}/stop',
+                lambda req, resp, n=name: self._on_stop(req, resp, n),
+                callback_group=cb,
+            )
 
         # Background serial read thread
         if self._ser:
             threading.Thread(target=self._read_loop, daemon=True).start()
 
         mode = 'dry_run' if self._dry_run else 'live'
-        self.get_logger().info(f'Pump node started ({mode})')
+        self.get_logger().info(
+            f'Pump node started ({mode}), motors: {MOTORS}')
 
     def _open_serial(self):
         try:
@@ -94,15 +98,15 @@ class PumpNode(Node):
 
     # -- Service callbacks ---------------------------------------------------
 
-    def _on_move(self, req, resp):
+    def _on_move(self, req, resp, motor_name):
         with self._lock:
-            if self._busy:
+            if self._busy[motor_name]:
                 resp.success = False
                 resp.message = 'busy'
                 return resp
-            self._busy = True
+            self._busy[motor_name] = True
 
-        cmd = move_command(self._motor_name, req.steps, req.speed_hz, req.accel_hz2)
+        cmd = move_command(motor_name, req.steps, req.speed_hz, req.accel_hz2)
         self._send_serial(cmd)
         self.get_logger().info(cmd)
 
@@ -110,13 +114,13 @@ class PumpNode(Node):
         resp.message = cmd
         return resp
 
-    def _on_stop(self, req, resp):
-        self._send_serial(stop_command(self._motor_name))
+    def _on_stop(self, req, resp, motor_name):
+        self._send_serial(stop_command(motor_name))
         with self._lock:
-            self._busy = False
-        self.get_logger().info(f'stop {self._motor_name}')
+            self._busy[motor_name] = False
+        self.get_logger().info(f'stop {motor_name}')
         resp.success = True
-        resp.message = f'stop {self._motor_name}'
+        resp.message = f'stop {motor_name}'
         return resp
 
     # -- Serial I/O ----------------------------------------------------------
@@ -144,29 +148,25 @@ class PumpNode(Node):
 
             m = _DONE_RE.match(line)
             if m:
-                with self._lock:
-                    self._busy = False
+                self._clear_busy(m.group(1))
                 self.get_logger().info(f'done {m.group(1)} steps={m.group(2)}')
                 continue
 
             m = _STOPPED_RE.match(line)
             if m:
-                with self._lock:
-                    self._busy = False
+                self._clear_busy(m.group(1))
                 self.get_logger().info(f'stopped {m.group(1)} steps={m.group(2)}')
                 continue
 
             m = _CANCEL_RE.match(line)
             if m:
-                with self._lock:
-                    self._busy = False
+                self._clear_busy(m.group(1))
                 self.get_logger().info(f'cancelled {m.group(1)}')
                 continue
 
             m = _ABORT_RE.match(line)
             if m:
-                with self._lock:
-                    self._busy = False
+                self._clear_busy(m.group(1))
                 self.get_logger().warn(
                     f'aborted {m.group(1)}; physical position may be lost')
                 continue
@@ -185,6 +185,11 @@ class PumpNode(Node):
                 self.get_logger().error(f'esp: {line}')
             else:
                 self.get_logger().info(f'esp: {line}')
+
+    def _clear_busy(self, motor_name):
+        with self._lock:
+            if motor_name in self._busy:
+                self._busy[motor_name] = False
 
 
 def main(args=None):
