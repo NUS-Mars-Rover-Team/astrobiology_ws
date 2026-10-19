@@ -46,7 +46,7 @@ class PumpNode(Node):
         super().__init__('pump_node')
 
         # Parameters
-        self.declare_parameter('port', '/dev/ttyUSB1')
+        self.declare_parameter('port', '/dev/esp_steppers')
         self.declare_parameter('baud', 115200)
         self.declare_parameter('dry_run', False)
 
