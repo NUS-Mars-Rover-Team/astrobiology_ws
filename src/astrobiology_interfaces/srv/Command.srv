@@ -1,0 +1,6 @@
+# A command with no arguments that takes time to finish.
+# Servers: /astrobiology/x_gantry/home, /astrobiology/y_gantry/home, /astrobiology/z_gantry/home
+---
+bool    success         # accepted, not finished
+string  message         # reason if rejected
+float32 expected_s      # estimated time to finish; 0 if rejected

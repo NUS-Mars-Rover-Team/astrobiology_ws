@@ -1,0 +1,9 @@
+# Move a stepper motor.  Maps directly to: g1 <motor> <steps> <speed_hz> <accel_hz2>
+# Used by all stepper actuators (pumps, centrifuge, flush, gantry axes).
+
+int32   steps           # signed step count (positive = forward, negative = reverse)
+int32   speed_hz        # pulses per second (1..50000)
+int32   accel_hz2       # pulses per second² (1..1000000)
+---
+bool    success
+string  message

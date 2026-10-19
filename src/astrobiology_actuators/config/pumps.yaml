@@ -1,0 +1,8 @@
+# Pump node parameters.
+# Steps, speed, and accel come from the StepperMove service request.
+pump_node:
+  ros__parameters:
+    port: /dev/esp_steppers
+    baud: 115200
+    dry_run: false
+    motor_name: pump

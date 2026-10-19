@@ -1,0 +1,8 @@
+# Run the carousel/centrifuge hybrid as a centrifuge. Stops on its own when the duration is up.
+# Server: /astrobiology/centrifuge/spin. Rejected unless in centrifuge mode.
+
+float32 duration_s      # ConOps: 300 s
+---
+bool    success         # accepted, not finished
+string  message         # reason if rejected
+float32 expected_s      # estimated time to finish; 0 if rejected

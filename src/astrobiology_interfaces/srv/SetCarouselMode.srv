@@ -1,0 +1,11 @@
+# Switch the hybrid between carousel and centrifuge mode.
+# Server: /astrobiology/carousel/set_mode. Rejected while the carousel or centrifuge is busy.
+
+uint8 MODE_CAROUSEL=0
+uint8 MODE_CENTRIFUGE=1
+
+uint8 mode
+---
+bool    success         # accepted, not finished
+string  message         # reason if rejected
+float32 expected_s      # estimated time to finish; 0 if rejected

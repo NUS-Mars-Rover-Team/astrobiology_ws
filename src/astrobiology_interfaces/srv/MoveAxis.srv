@@ -1,0 +1,10 @@
+# Move one gantry axis.
+# Servers: /astrobiology/x_gantry/move, /astrobiology/y_gantry/move, /astrobiology/z_gantry/move
+# GUI: X and Y numeric fields send relative=false. Z numeric field = absolute; arrow buttons = small relative steps.
+
+float32 position_mm     # absolute target, or signed offset if relative
+bool    relative
+---
+bool    success         # accepted, not finished
+string  message         # reason if rejected
+float32 expected_s      # estimated time to finish; 0 if rejected
