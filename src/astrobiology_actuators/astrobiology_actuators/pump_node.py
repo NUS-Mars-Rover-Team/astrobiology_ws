@@ -21,7 +21,8 @@ from astrobiology_actuators.serial_commands import (
     stop_command,
 )
 
-MOTORS = ['p', 'f']
+# short name → firmware full name (firmware feedback uses full names)
+MOTORS = {'p': 'pump', 'f': 'flush'}
 
 # Firmware feedback patterns
 _DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
@@ -44,6 +45,8 @@ class PumpNode(Node):
 
         self._dry_run = self.get_parameter('dry_run').value
         self._busy = {name: False for name in MOTORS}
+        # Reverse lookup: firmware full name → short name
+        self._full_to_short = {full: short for short, full in MOTORS.items()}
 
         # Serial port
         self._lock = threading.Lock()
@@ -186,10 +189,13 @@ class PumpNode(Node):
             else:
                 self.get_logger().info(f'esp: {line}')
 
-    def _clear_busy(self, motor_name):
+    def _clear_busy(self, firmware_name):
+        # Firmware feedback uses full names (pump, flush);
+        # _busy keys are short names (p, f)
+        short = self._full_to_short.get(firmware_name, firmware_name)
         with self._lock:
-            if motor_name in self._busy:
-                self._busy[motor_name] = False
+            if short in self._busy:
+                self._busy[short] = False
 
 
 def main(args=None):
