@@ -23,12 +23,12 @@
     flip: true
 
     # Wavelength calibration: two ROI columns with known wavelengths.
-    # NOT CALIBRATED YET: these are spectro-cam-rs defaults (436/546 nm Hg lines of a fluorescent
-    # lamp). Replace with columns measured from an RGB LED, lasers or a fluorescent lamp.
-    low_wavelength: 436.0
-    low_index: 261
-    high_wavelength: 546.0
-    high_index: 486
+    # Calibrated against the Hg 435.8 / 546.1 nm lines of a CFL. Check: Hg 404.7 reads 404.3,
+    # Tb 487 reads 487.8, Eu 611.6 reads 610.2. Shifts by roi_x if the ROI is moved.
+    low_wavelength: 435.8
+    low_index: 456
+    high_wavelength: 546.1
+    high_index: 666
 
     # Postprocessing
     linearize: "off"         # off | rec601 | rec709 | srgb
