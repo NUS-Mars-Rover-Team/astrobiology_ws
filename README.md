@@ -87,8 +87,12 @@ ros2 launch spectro_cam spectro_cam.launch.py
 
 ### Live spectrum plot (diagnostic)
 
+Runs on any machine on the same network as the Pi (same `ROS_DOMAIN_ID=67` and
+`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`; build `astrobiology_msgs` and `spectro_cam` there too):
+
 ```bash
-ros2 run spectro_cam spectrum_plot
+ros2 run spectro_cam spectrum_plot            # x-axis in nm
+ros2 run spectro_cam spectrum_plot --pixels   # x-axis in ROI columns, for calibration
 ```
 
 ## Usage
@@ -126,8 +130,39 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/y_gantry/stop` | Trigger | Stop Y axis |
 | `/astrobiology/z_gantry/move` | StepperMove | Gantry Z axis |
 | `/astrobiology/z_gantry/stop` | Trigger | Stop Z axis |
-| `/spectro/.../set_zero_reference` | Trigger | Set spectrum zero reference |
-| `/spectro/.../clear_zero_reference` | Trigger | Clear zero reference |
+| `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
+| `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
+
+### Spectrometer measurements
+
+The wavelength calibration and the camera settings for the 5 V halogen lamp are in
+[`src/spectro_cam/config/spectro.yaml`](src/spectro_cam/config/spectro.yaml) (±1.5 nm over
+404–611 nm). The full calibration record, accuracy figures and open items are in
+[`docs/spectrometer_calibration.md`](docs/spectrometer_calibration.md).
+
+To measure an absorption spectrum (e.g. a dye in a cuvette):
+
+```bash
+# 1. Halogen lamp on, water blank in the cuvette holder; raw combined level should be ~0.2
+ros2 service call /spectro/spectrum_node/clear_zero_reference std_srvs/srv/Trigger
+sleep 2   # let the averaging buffer refill with the blank
+ros2 service call /spectro/spectrum_node/set_zero_reference std_srvs/srv/Trigger
+# 2. Swap in the sample without moving the lamp or the holder
+```
+
+With `reference_mode: absorbance` (the default in `spectro.yaml`), `/spectro/spectrum` then
+carries absorbance, `-log10(I/I0)`. Absorption bands show up as positive peaks at their true
+wavelength (in `peak_wavelengths`), and their height scales with concentration. Set
+`reference_mode subtract` for the spectro-cam-rs behaviour (`I - I0`).
+
+Things to keep in mind:
+- **Retake the blank** after changing the lamp, the exposure or the cuvette position.
+- **Line sources (CFL, lasers):** clear the blank and drop to exposure ~50 at 30 fps, or they
+  saturate.
+- **Usable range with the halogen lamp:** ~500–900 nm. There's very little light below 470 nm.
+- **Use only `combined`:** the R/G/B channels don't separate colour on this camera.
+- **Live parameter changes aren't saved:** `ros2 param set` changes the running node only and is
+  lost on restart. Copy values into `spectro.yaml` on the Pi to keep them.
 
 ### StepperMove.srv
 
