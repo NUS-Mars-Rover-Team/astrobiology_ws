@@ -21,8 +21,15 @@ from astrobiology_actuators.serial_commands import (
     stop_command,
 )
 
-# short name → firmware full name (firmware feedback uses full names)
-MOTORS = {'p': 'pump', 'f': 'flush'}
+# service_name → (firmware_cmd_name, firmware_feedback_name)
+MOTORS = {
+    'pump':       ('p', 'pump'),
+    'flush':      ('f', 'flush'),
+    'centrifuge': ('c', 'centrifuge'),
+    'x_gantry':   ('x', 'x'),
+    'y_gantry':   ('y', 'y'),
+    'z_gantry':   ('z', 'z'),
+}
 
 # Firmware feedback patterns
 _DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
@@ -45,8 +52,10 @@ class PumpNode(Node):
 
         self._dry_run = self.get_parameter('dry_run').value
         self._busy = {name: False for name in MOTORS}
-        # Reverse lookup: firmware full name → short name
-        self._full_to_short = {full: short for short, full in MOTORS.items()}
+        # Reverse lookup: firmware feedback name → service name
+        self._feedback_to_service = {
+            fb: svc for svc, (_, fb) in MOTORS.items()
+        }
 
         # Serial port
         self._lock = threading.Lock()
@@ -76,7 +85,7 @@ class PumpNode(Node):
 
         mode = 'dry_run' if self._dry_run else 'live'
         self.get_logger().info(
-            f'Pump node started ({mode}), motors: {MOTORS}')
+            f'Stepper node started ({mode}), motors: {list(MOTORS.keys())}')
 
     def _open_serial(self):
         try:
@@ -101,15 +110,16 @@ class PumpNode(Node):
 
     # -- Service callbacks ---------------------------------------------------
 
-    def _on_move(self, req, resp, motor_name):
+    def _on_move(self, req, resp, service_name):
         with self._lock:
-            if self._busy[motor_name]:
+            if self._busy[service_name]:
                 resp.success = False
                 resp.message = 'busy'
                 return resp
-            self._busy[motor_name] = True
+            self._busy[service_name] = True
 
-        cmd = move_command(motor_name, req.steps, req.speed_hz, req.accel_hz2)
+        cmd_name = MOTORS[service_name][0]
+        cmd = move_command(cmd_name, req.steps, req.speed_hz, req.accel_hz2)
         self._send_serial(cmd)
         self.get_logger().info(cmd)
 
@@ -117,13 +127,14 @@ class PumpNode(Node):
         resp.message = cmd
         return resp
 
-    def _on_stop(self, req, resp, motor_name):
-        self._send_serial(stop_command(motor_name))
+    def _on_stop(self, req, resp, service_name):
+        cmd_name = MOTORS[service_name][0]
+        self._send_serial(stop_command(cmd_name))
         with self._lock:
-            self._busy[motor_name] = False
-        self.get_logger().info(f'stop {motor_name}')
+            self._busy[service_name] = False
+        self.get_logger().info(f'stop {cmd_name}')
         resp.success = True
-        resp.message = f'stop {motor_name}'
+        resp.message = f'stop {cmd_name}'
         return resp
 
     # -- Serial I/O ----------------------------------------------------------
@@ -190,12 +201,13 @@ class PumpNode(Node):
                 self.get_logger().info(f'esp: {line}')
 
     def _clear_busy(self, firmware_name):
-        # Firmware feedback uses full names (pump, flush);
-        # _busy keys are short names (p, f)
-        short = self._full_to_short.get(firmware_name, firmware_name)
+        # Firmware feedback uses full names (pump, flush, centrifuge, x, y, z);
+        # _busy keys are service names (pump, flush, centrifuge, x_gantry, y_gantry, z_gantry)
+        svc = self._feedback_to_service.get(firmware_name)
+        if svc is None:
+            return
         with self._lock:
-            if short in self._busy:
-                self._busy[short] = False
+            self._busy[svc] = False
 
 
 def main(args=None):

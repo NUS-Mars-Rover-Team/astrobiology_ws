@@ -4,5 +4,5 @@ pump_node:
   ros__parameters:
     port: /dev/ttyUSB1
     baud: 115200
-    dry_run: true
+    dry_run: false
     motor_name: pump
