@@ -13,6 +13,13 @@ from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import butter, lfilter
 
 LINEARIZE_MODES = ('off', 'rec601', 'rec709', 'srgb')
+REFERENCE_MODES = ('subtract', 'absorbance')
+
+# Absorbance is only computed where the reference is above this, i.e. clearly above the camera's
+# dark noise (~0.0003); elsewhere it is 0 rather than amplified noise.
+ABSORBANCE_MIN_REFERENCE = 0.002
+# Cap for -log10(I/I0) when (almost) no light gets through; ~0.1% transmission
+ABSORBANCE_MAX = 3.0
 
 
 def clamp_roi(x, y, width, height, frame_width, frame_height):
@@ -51,7 +58,7 @@ def sum_rows(roi_rgb):
 
 
 def linearize(values, mode):
-    """Remove camera gamma (Linearize::linearize, config.rs:27-45)."""
+    """Remove camera gamma (Linearize::linearize, config.rs:27-45). `values` are in 0..1."""
     if mode == 'off':
         return values
     if mode in ('rec601', 'rec709'):
@@ -121,6 +128,15 @@ class ProcessingSettings:
     buffer_size: int = 10
     filter_active: bool = False
     filter_cutoff: float = 0.5
+    reference_mode: str = 'subtract'
+
+
+def absorbance(spectrum, reference):
+    """-log10(I / I0) per sample; 0 where the reference is too dark to divide by."""
+    usable = reference >= ABSORBANCE_MIN_REFERENCE
+    ratio = np.maximum(spectrum, 1e-9) / np.where(usable, reference, 1.0)
+    result = np.minimum(-np.log10(ratio), ABSORBANCE_MAX)
+    return np.where(usable, result, 0.0).astype(np.float32)
 
 
 class SpectrumProcessor:
@@ -135,6 +151,8 @@ class SpectrumProcessor:
         self._buffer = deque()
         self._zero_reference = None
         self.spectrum = np.zeros((4, 0), dtype=np.float32)
+        # Latest spectrum before the zero reference is applied; what set_zero_reference snapshots
+        self._unreferenced = self.spectrum
 
     def clear_buffer(self):
         self._buffer.clear()
@@ -143,10 +161,14 @@ class SpectrumProcessor:
         return self._zero_reference is not None
 
     def set_zero_reference(self):
-        """Snapshot the current processed spectrum. Returns False if there is none yet."""
-        if self.spectrum.shape[1] == 0:
+        """Snapshot the current spectrum, before any existing reference is applied.
+
+        Snapshotting the referenced output instead would make a second call cancel the first.
+        Returns False if there is no spectrum yet.
+        """
+        if self._unreferenced.shape[1] == 0:
             return False
-        self._zero_reference = self.spectrum.copy()
+        self._zero_reference = self._unreferenced.copy()
         return True
 
     def clear_zero_reference(self):
@@ -165,8 +187,10 @@ class SpectrumProcessor:
             self._buffer.clear()
             self._zero_reference = None
 
-        # Linearize each frame before it enters the averaging buffer
-        spectrum_rgb = linearize(spectrum_rgb, settings.linearize)
+        # Linearize each frame before it enters the averaging buffer. Channels are normalised to
+        # 0..1/3 (see sum_rows), so scale to 0..1 for the gamma curve and back again.
+        if settings.linearize != 'off':
+            spectrum_rgb = linearize(spectrum_rgb * 3.0, settings.linearize) / 3.0
 
         self._buffer.appendleft(spectrum_rgb)
         while len(self._buffer) > settings.buffer_size:
@@ -183,11 +207,14 @@ class SpectrumProcessor:
         if settings.filter_active:
             current = lowpass_forward_reverse(current, settings.filter_cutoff)
 
+        self._unreferenced = current
         if self._zero_reference is not None:
-            if self._zero_reference.shape == current.shape:
-                current = current - self._zero_reference
-            else:
+            if self._zero_reference.shape != current.shape:
                 self._zero_reference = None
+            elif settings.reference_mode == 'absorbance':
+                current = absorbance(current, self._zero_reference)
+            else:
+                current = current - self._zero_reference
 
         self.spectrum = current
         return current

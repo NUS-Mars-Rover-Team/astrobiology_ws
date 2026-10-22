@@ -4,10 +4,12 @@ import numpy as np
 import pytest
 
 from spectro_cam.processing import (
+    ABSORBANCE_MAX,
     LINEARIZE_MODES,
     Calibration,
     ProcessingSettings,
     SpectrumProcessor,
+    absorbance,
     clamp_roi,
     extract_roi,
     find_peaks_dips,
@@ -133,6 +135,43 @@ def test_zero_reference():
     spectrum = processor.update(constant(20, 0.5))
     assert not processor.has_zero_reference()
     assert spectrum.max() == pytest.approx(0.5)
+
+
+def test_zero_reference_set_twice():
+    processor = SpectrumProcessor()
+    processor.update(constant(10, 0.5))
+    assert processor.set_zero_reference()
+    processor.update(constant(10, 0.5))
+    # The second snapshot must be of the input, not of the already-zeroed output
+    assert processor.set_zero_reference()
+    assert np.abs(processor.update(constant(10, 0.5))).max() == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize('mode', ['srgb', 'rec709'])
+def test_linearize_uses_full_channel_range(mode):
+    processor = SpectrumProcessor(ProcessingSettings(linearize=mode, buffer_size=1))
+    # Saturated channels read 1/3 (see sum_rows) and must stay saturated
+    assert processor.update(constant(4, 1 / 3))[0, 0] == pytest.approx(1 / 3)
+    # Half-scale input goes through the curve at 0.5, not at 0.5/3
+    half = processor.update(constant(4, 1 / 6))[0, 0]
+    assert half == pytest.approx(linearize(np.float32([0.5]), mode)[0] / 3, rel=1e-5)
+
+
+def test_absorbance():
+    reference = np.array([0.2, 0.2, 0.2, 0.0005], dtype=np.float32)
+    spectrum = np.array([0.2, 0.02, 0.0, 0.0001], dtype=np.float32)
+    result = absorbance(spectrum, reference)
+    assert result[0] == pytest.approx(0.0, abs=1e-6)  # all light through
+    assert result[1] == pytest.approx(1.0)  # 10% through
+    assert result[2] == pytest.approx(ABSORBANCE_MAX)  # nothing through, capped
+    assert result[3] == 0.0  # reference too dark to divide by
+
+
+def test_zero_reference_absorbance_mode():
+    processor = SpectrumProcessor(ProcessingSettings(reference_mode='absorbance', buffer_size=1))
+    processor.update(constant(10, 0.2))
+    assert processor.set_zero_reference()
+    assert processor.update(constant(10, 0.02))[3, 0] == pytest.approx(1.0)
 
 
 def test_lowpass_coefficients_match_biquad_crate():

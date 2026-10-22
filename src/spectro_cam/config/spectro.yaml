@@ -6,12 +6,14 @@
     device: /dev/spectroscope  # udev alias for the Sonix spectroscope camera on the Pi
     frame_width: 1920        # use the lowest resolution that still gives enough spectral pixels;
     frame_height: 1080       # MJPEG decoding is the main CPU cost on a Pi 4
-    fps: 30
+    fps: 15                  # 15 rather than 30 to allow the longer exposure below
     fourcc: MJPG             # MJPG | YUYV | "" (camera default)
     # Applied with v4l2-ctl, in order, every time the camera opens (they reset on unplug/reboot).
-    # Manual exposure first, then the exposure time in 0.1 ms units (<= 330 to keep 30 fps).
+    # Manual exposure first, then the exposure time in 0.1 ms units (<= 10000 / fps).
+    # 660 puts the 5 V halogen lamp through a water cuvette at ~0.2 combined. A bright CFL needs
+    # ~50 at 30 fps instead, or its lines saturate (flat tops at 0.333).
     # List a camera's controls with: v4l2-ctl -d <device> --list-ctrls
-    v4l2_controls: "auto_exposure=1,exposure_dynamic_framerate=0,white_balance_automatic=0,backlight_compensation=0,sharpness=1,exposure_time_absolute=50"
+    v4l2_controls: "auto_exposure=1,exposure_dynamic_framerate=0,white_balance_automatic=0,backlight_compensation=0,sharpness=1,exposure_time_absolute=660"
     frame_id: spectrometer
 
     # Region of interest. Columns become spectrum samples, rows are summed.
@@ -23,21 +25,24 @@
     flip: true
 
     # Wavelength calibration: two ROI columns with known wavelengths.
-    # NOT CALIBRATED YET: these are spectro-cam-rs defaults (436/546 nm Hg lines of a fluorescent
-    # lamp). Replace with columns measured from an RGB LED, lasers or a fluorescent lamp.
-    low_wavelength: 436.0
-    low_index: 261
-    high_wavelength: 546.0
-    high_index: 486
+    # Calibrated against the Hg 435.8 / 546.1 nm lines of a CFL. Check: Hg 404.7 reads 404.3,
+    # Tb 487 reads 487.8, Eu 611.6 reads 610.2. Shifts by roi_x if the ROI is moved.
+    low_wavelength: 435.8
+    low_index: 456
+    high_wavelength: 546.1
+    high_index: 666
 
     # Postprocessing
     linearize: "off"         # off | rec601 | rec709 | srgb
     gain_r: 1.0
     gain_g: 1.0
     gain_b: 1.0
-    buffer_size: 30          # frames averaged (1..100 in spectro-cam-rs)
+    buffer_size: 15          # frames averaged (1..100 in spectro-cam-rs); ~1 s at 15 fps
     filter_active: false
     filter_cutoff: 0.5       # relative to Nyquist, 0.001..1
+    # How set_zero_reference is applied. absorbance = -log10(I/I0): absorption bands become
+    # positive peaks at their true position. subtract = I - I0, as in spectro-cam-rs.
+    reference_mode: absorbance
     peaks_find_window: 20    # samples on each side
     peaks_unique_window: 50.0  # nm
 

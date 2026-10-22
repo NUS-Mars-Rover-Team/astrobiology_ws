@@ -15,8 +15,9 @@ float32[] r
 float32[] g
 float32[] b
 
-# (r + g + b) / 3 after gain, low-pass filter and zero-reference subtraction.
-# This is the "sum" line in spectro-cam-rs; peaks and dips are detected on it.
+# (r + g + b) / 3 after gain, low-pass filter and zero reference. This is the "sum" line in
+# spectro-cam-rs; peaks and dips are detected on it. While a zero reference is set, r, g, b and
+# combined are I - I0 (reference_mode subtract) or -log10(I/I0) (reference_mode absorbance).
 float32[] combined
 
 # Peaks and dips of `combined` (sliding-window detection + uniqueness window)

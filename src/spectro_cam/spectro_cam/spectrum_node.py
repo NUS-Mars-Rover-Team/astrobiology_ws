@@ -23,6 +23,7 @@ from std_srvs.srv import Trigger
 
 from spectro_cam.processing import (
     LINEARIZE_MODES,
+    REFERENCE_MODES,
     Calibration,
     ProcessingSettings,
     SpectrumProcessor,
@@ -60,6 +61,9 @@ PARAMETERS = {
     'buffer_size': (10, int, 'Number of frames averaged (1..100 in spectro-cam-rs)'),
     'filter_active': (False, bool, 'Enable the Butterworth low-pass filter'),
     'filter_cutoff': (0.5, float, 'Low-pass cutoff relative to Nyquist, 0.001..1'),
+    'reference_mode': ('subtract', str,
+                       'How the zero reference is applied: subtract (spectro-cam-rs) | '
+                       'absorbance (-log10(I/I0), absorption bands become positive peaks)'),
     'peaks_find_window': (5, int, 'Samples on each side a peak/dip must exceed'),
     'peaks_unique_window': (50.0, float, 'Only the strongest peak/dip within this many nm is kept'),
     'max_publish_rate_hz': (15.0, float, 'Spectrum publish rate limit; 0 publishes every frame'),
@@ -107,6 +111,8 @@ def _validate(values):
         (values['low_index'] >= 0 and values['high_index'] >= 0, 'indices must be >= 0'),
         (values['low_index'] != values['high_index'], 'low_index and high_index must differ'),
         (values['linearize'] in LINEARIZE_MODES, f'linearize must be one of {LINEARIZE_MODES}'),
+        (values['reference_mode'] in REFERENCE_MODES,
+         f'reference_mode must be one of {REFERENCE_MODES}'),
         (min(values['gain_r'], values['gain_g'], values['gain_b']) >= 0, 'gains must be >= 0'),
         (values['buffer_size'] >= 1, 'buffer_size must be >= 1'),
         (0 < values['filter_cutoff'] <= 1, 'filter_cutoff must be in (0, 1]'),
@@ -130,6 +136,7 @@ def _processing_settings(values):
         buffer_size=values['buffer_size'],
         filter_active=values['filter_active'],
         filter_cutoff=values['filter_cutoff'],
+        reference_mode=values['reference_mode'],
     )
 
 

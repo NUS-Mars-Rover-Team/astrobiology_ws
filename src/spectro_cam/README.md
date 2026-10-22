@@ -38,6 +38,7 @@ node.create_subscription(Spectrum, '/spectro/spectrum', callback, qos_profile_se
 All parameters are in [`config/spectro.yaml`](config/spectro.yaml), with defaults taken from
 spectro-cam-rs. They can be changed while the node runs, e.g.
 `ros2 param set /spectro/spectrum_node buffer_size 30`. Invalid values are rejected with a reason.
+Quote `off` when setting `linearize` (`linearize "'off'"`), since a bare `off` is parsed as `false`.
 Changing `device`, `frame_*`, `fps` or `fourcc` reopens the camera.
 
 ## Setup on the Raspberry Pi (Ubuntu 22.04 + ROS 2 Humble)
@@ -104,8 +105,13 @@ network is probably blocking multicast. Give CycloneDDS explicit peers with a
 2. **Wavelength:** point the spectroscope at a fluorescent lamp. Find the array indices of the
    436 nm (violet) and 546 nm (bright green) mercury lines in `combined`, by plotting against
    index or reading `peak_wavelengths`. Set `low_index` and `high_index` to those indices.
-3. **Absorption measurements:** with the light source on and no sample, call `set_zero_reference`.
-   Later spectra then have that baseline subtracted.
+3. **Absorption measurements:** with the light source on and a blank (e.g. a water cuvette) in
+   place, wait for the averaging buffer to refill, then call `set_zero_reference`. With
+   `reference_mode: absorbance`, later spectra are `-log10(I/I0)`, so absorption bands are
+   positive peaks at their true wavelength and scale with concentration. `subtract` gives
+   `I - I0` like spectro-cam-rs, where the dip is weighted by the lamp spectrum and shifts
+   towards wherever the lamp is brightest. Changing the lamp, exposure or cuvette position
+   invalidates the reference.
 4. Copy the final values into your YAML.
 
 ## Testing without the camera
