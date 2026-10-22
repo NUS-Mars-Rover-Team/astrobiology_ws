@@ -24,6 +24,10 @@ digraph astrobiology {
             label="ESP32\n6-Channel Stepper\nController\n(pump, flush, centrifuge,\nx, y, z)"
             shape=box3d style=filled fillcolor="#FFE0B2"
         ];
+        esp_lights [
+            label="ESP32\nScience Lights\nController\n(UV1, UV2, laser, halogen)"
+            shape=box3d style=filled fillcolor="#FFE0B2"
+        ];
         spectro_cam [
             label="Sonix\nSpectroscope\nCamera"
             shape=box3d style=filled fillcolor="#FFE0B2"
@@ -39,6 +43,10 @@ digraph astrobiology {
 
         pump_node [
             label="pump_node\n(astrobiology_actuators)"
+            shape=ellipse style=filled fillcolor="#BBDEFB"
+        ];
+        lights_node [
+            label="lights_node\n(astrobiology_actuators)"
             shape=ellipse style=filled fillcolor="#BBDEFB"
         ];
         spectrum_node [
@@ -124,6 +132,23 @@ digraph astrobiology {
             shape=hexagon style=filled fillcolor="#F3E5F5"
         ];
 
+        uv1_set [
+            label="/astrobiology/\nuv1/set\n[SetBool]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        uv2_set [
+            label="/astrobiology/\nuv2/set\n[SetBool]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        laser_set [
+            label="/astrobiology/\nlaser/set\n[SetBool]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        halogen_set [
+            label="/astrobiology/\nhalogen/set\n[SetBool]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+
         set_zero [
             label="/spectro/.../\nset_zero_reference\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
@@ -136,6 +161,7 @@ digraph astrobiology {
 
     // ── Edges: hardware → nodes ──────────────────────────────
     esp_steppers -> pump_node      [label="serial\n/dev/esp_steppers\n115200\ng1 protocol" style=bold color="#E65100"];
+    esp_lights   -> lights_node    [label="serial\n/dev/esp_lights\n115200\nNAME 0|1" style=bold color="#E65100"];
     spectro_cam  -> spectrum_node  [label="V4L2\n/dev/spectroscope" style=bold color="#E65100"];
 
     // ── Edges: nodes → topics ────────────────────────────────
@@ -158,6 +184,11 @@ digraph astrobiology {
     pump_node -> y_gantry_stop   [label="server" color="#6A1B9A"];
     pump_node -> z_gantry_move   [label="server" color="#6A1B9A"];
     pump_node -> z_gantry_stop   [label="server" color="#6A1B9A"];
+
+    lights_node -> uv1_set      [label="server" color="#6A1B9A"];
+    lights_node -> uv2_set      [label="server" color="#6A1B9A"];
+    lights_node -> laser_set    [label="server" color="#6A1B9A"];
+    lights_node -> halogen_set  [label="server" color="#6A1B9A"];
 
     spectrum_node -> set_zero   [label="server" color="#6A1B9A"];
     spectrum_node -> clear_zero [label="server" color="#6A1B9A"];
