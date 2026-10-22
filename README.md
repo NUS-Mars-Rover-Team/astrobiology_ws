@@ -1,6 +1,6 @@
 # Astrobiology Payload ROS 2 Workspace
 
-ROS 2 (Humble) workspace for the NUS Mars Rover astrobiology payload. Controls stepper motors (pumps, gantry, centrifuge) and a USB spectroscope camera via a Raspberry Pi.
+ROS 2 (Humble) workspace for the NUS Mars Rover astrobiology payload. Controls stepper motors (pumps, gantry, centrifuge), science lights (UV, laser, halogen), and a USB spectroscope camera via a Raspberry Pi.
 
 ## Architecture
 
@@ -13,6 +13,7 @@ Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into
 | Device | Interface | udev alias |
 |--------|-----------|------------|
 | ESP32 6-channel stepper controller | Serial 115200 (g1 protocol) | `/dev/esp_steppers` |
+| ESP32 science lights controller | Serial 115200 (NAME 0\|1) | `/dev/esp_lights` |
 | Sonix spectroscope camera | V4L2 (1920x1080 MJPG) | `/dev/spectroscope` |
 
 ### ESP32 Motor Channels
@@ -26,11 +27,20 @@ Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into
 | Y gantry | y | y | 26 | 27 | 25 |
 | Z gantry | z | z | 12 | 13 | 14 |
 
+### ESP32 Science Lights Channels
+
+| Light | Firmware name | GPIO |
+|-------|--------------|------|
+| UV LED 1 | UV1 | 25 |
+| UV LED 2 | UV2 | 26 |
+| Laser | LAS | 27 |
+| Halogen | HAL | 33 |
+
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| `astrobiology_actuators` | Stepper motor node (pump, flush, centrifuge, gantry) |
+| `astrobiology_actuators` | Stepper motor node and science lights node |
 | `spectro_cam` | USB spectrometer node (capture, process, publish spectra) |
 | `astrobiology_interfaces` | Service definitions (`StepperMove.srv`, etc.) |
 | `astrobiology_msgs` | Legacy message/service definitions (`Spectrum.msg`, `MotorStatus.msg`) |
@@ -60,6 +70,9 @@ Create `/etc/udev/rules.d/99-astrobiology.rules`:
 # ESP32 stepper controller (CP2102)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="esp_steppers", MODE="0666"
 
+# ESP32 science lights controller — update idVendor/idProduct or use ATTRS{serial} to distinguish from esp_steppers
+SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="esp_lights", MODE="0666"
+
 # Sonix spectroscope camera
 SUBSYSTEM=="video4linux", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="spectroscope", MODE="0666"
 ```
@@ -79,6 +92,14 @@ ros2 launch astrobiology_actuators pumps.launch.py
 
 This starts `pump_node` with 12 services (move + stop for each of 6 motors).
 
+### Launch science lights
+
+```bash
+ros2 launch astrobiology_actuators lights.launch.py
+```
+
+This starts `lights_node` with 4 services (SetBool for UV1, UV2, laser, halogen).
+
 ### Launch spectrometer
 
 ```bash
@@ -96,6 +117,20 @@ ros2 run spectro_cam spectrum_plot --pixels   # x-axis in ROI columns, for calib
 ```
 
 ## Usage
+
+### Science light control
+
+Each light has a `SetBool` service (`data: true` = ON, `data: false` = OFF):
+
+```bash
+# Turn laser on
+ros2 service call /astrobiology/laser/set std_srvs/srv/SetBool "{data: true}"
+
+# Turn UV1 off
+ros2 service call /astrobiology/uv1/set std_srvs/srv/SetBool "{data: false}"
+```
+
+All lights are turned off automatically when the node shuts down.
 
 ### Stepper motor control
 
@@ -130,6 +165,10 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/y_gantry/stop` | Trigger | Stop Y axis |
 | `/astrobiology/z_gantry/move` | StepperMove | Gantry Z axis |
 | `/astrobiology/z_gantry/stop` | Trigger | Stop Z axis |
+| `/astrobiology/uv1/set` | SetBool | UV LED 1 on/off |
+| `/astrobiology/uv2/set` | SetBool | UV LED 2 on/off |
+| `/astrobiology/laser/set` | SetBool | Laser on/off |
+| `/astrobiology/halogen/set` | SetBool | Halogen lamp on/off |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
 
@@ -198,7 +237,20 @@ help                                                 Print help
 
 Motor IDs: `pump` (`p`), `flush` (`f`), `centrifuge` (`c`), `x`, `y`, `z`.
 
-Firmware feedback:
+### Science lights ESP32 protocol
+
+The lights ESP32 accepts line-based commands at 115200 baud:
+
+```
+<NAME> <0|1>       Set light on (1) or off (0)
+```
+
+Light names: `UV1`, `UV2`, `LAS`, `HAL`.
+
+The ESP32 echoes back `<NAME> <val>\n` on success. Unrecognized names are silently dropped.
+
+### Stepper firmware feedback
+
 ```
 ok <motor> accepted          Move started
 done <motor> steps=<N>       Move completed
