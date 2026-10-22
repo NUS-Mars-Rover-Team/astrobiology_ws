@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pump_node = astrobiology_actuators.pump_node:main',
+            'lights_node = astrobiology_actuators.lights_node:main',
         ],
     },
 )
