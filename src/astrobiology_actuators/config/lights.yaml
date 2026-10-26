@@ -1,0 +1,6 @@
+# Science lights node parameters.
+lights_node:
+  ros__parameters:
+    port: /dev/esp_lights
+    baud: 115200
+    dry_run: false
