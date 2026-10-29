@@ -2,6 +2,9 @@
 
 A quick debugging view, not a full GUI: R, G, B and combined against wavelength, with peak
 markers. Use --pixels to put ROI pixel columns on the x-axis when calibrating.
+
+The y-axis is fixed (--ylim, default 0..0.35, just above the 1/3 saturation level) so exposure
+and saturation can be read off directly. Use --autoscale for absorbance, which has no fixed range.
 """
 
 import argparse
@@ -40,9 +43,13 @@ class SpectrumSubscriber(Node):
 
 class SpectrumFigure:
 
-    def __init__(self, pixels):
+    def __init__(self, pixels, ylim):
         self.pixels = pixels
+        self.autoscale_y = ylim is None
+        self._x_range = None
         self.fig, self.ax = plt.subplots(figsize=(11, 5))
+        if ylim is not None:
+            self.ax.set_ylim(*ylim)
         self.lines = {
             'r': self.ax.plot([], [], color='tab:red', lw=1, label='R')[0],
             'g': self.ax.plot([], [], color='tab:green', lw=1, label='G')[0],
@@ -77,8 +84,16 @@ class SpectrumFigure:
             for px, value in zip(peak_x, msg.peak_values)
         ]
 
-        self.ax.relim()
-        self.ax.autoscale_view()
+        # Only reset x when the calibration or ROI changes, so a toolbar zoom survives new frames
+        x_range = (float(x.min()), float(x.max())) if len(x) > 1 else None
+        if x_range is not None and x_range != self._x_range:
+            self._x_range = x_range
+            self.ax.set_xlim(*x_range)
+        # Hold the view while the zoom or pan tool is selected; deselect it to resume
+        toolbar = self.fig.canvas.toolbar
+        if self.autoscale_y and not (toolbar is not None and toolbar.mode):
+            self.ax.relim()
+            self.ax.autoscale(axis='y')
         self.ax.set_title(f'{len(wavelengths)} samples, max {max(msg.combined, default=0):.4f}')
 
 
@@ -87,6 +102,10 @@ def main():
     parser.add_argument('--topic', default='/spectro/spectrum')
     parser.add_argument('--pixels', action='store_true',
                         help='x-axis in ROI pixel columns instead of nm (for calibration)')
+    parser.add_argument('--ylim', nargs=2, type=float, default=[0.0, 0.35],
+                        metavar=('MIN', 'MAX'), help='fixed y-axis range (default: 0 0.35)')
+    parser.add_argument('--autoscale', action='store_true',
+                        help='autoscale the y-axis instead (e.g. for absorbance spectra)')
     args = parser.parse_args(remove_ros_args(sys.argv)[1:])
 
     rclpy.init(args=sys.argv)
@@ -96,7 +115,7 @@ def main():
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
 
-    figure = SpectrumFigure(args.pixels)
+    figure = SpectrumFigure(args.pixels, None if args.autoscale else args.ylim)
 
     def update(_):
         msg = node.take()
