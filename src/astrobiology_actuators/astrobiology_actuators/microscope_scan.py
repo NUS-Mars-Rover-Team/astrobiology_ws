@@ -8,11 +8,20 @@ Subcommands:
     microscope_scan home [x y z] home onto the endstops (firmware order Z, Y, X)
     microscope_scan goto --x 1   absolute move in mm (axes not given stay put);
                                  Z moves alone: first toward 0, last away from 0
+    microscope_scan scan --dry-run   print the scan points and moves (no port)
+
+Scan geometry (config/microscope_scan.yaml): the gantry moves the cache tray
+under a fixed microscope, so tray point p is under the lens when the gantry is at
+    target = microscope_offset - (grid_offset + p)
 """
 
 import argparse
+from dataclasses import dataclass
+from pathlib import Path
 import sys
 import time
+
+import yaml
 
 from astrobiology_actuators.serial_commands import (
     DONE_RE,
@@ -40,12 +49,31 @@ MAX_ACCEL_MM_S2 = 1000000 / STEPS_PER_MM    # 312.5
 DEFAULT_SPEED_MM_S = 5.0
 DEFAULT_ACCEL_MM_S2 = 10.0
 
+CONFIG_NAME = 'microscope_scan.yaml'
+
 # Reply prefixes (lower-cased) that mean the firmware rejected or aborted something
 _FAULT_PREFIXES = ('error', 'aborted', 'estop')
 
 
 class GantryError(RuntimeError):
     """The firmware reported a fault, or an expected reply never arrived."""
+
+
+class ScanConfigError(ValueError):
+    """The scan config is invalid or would drive the gantry out of bounds."""
+
+
+def safe_groups(current_z, target):
+    """Split a target into the axis groups to move, in order.
+
+    Z = 0 is the clear position (the firmware homes Z first to lift clear),
+    so Z moves first when it is heading toward 0 and last when heading away:
+    the tray lifts clear before travelling and travels before lowering.
+    """
+    xy = {axis: target[axis] for axis in 'xy' if axis in target}
+    z = {'z': target['z']} if 'z' in target else {}
+    groups = (z, xy) if z and z['z'] < current_z else (xy, z)
+    return [group for group in groups if group]
 
 
 class Gantry:
@@ -173,22 +201,10 @@ class Gantry:
         self._moving = False
 
     def move_safe(self, target, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2):
-        """move_to, but Z and XY never move at the same time.
-
-        Z = 0 is the clear position (the firmware homes Z first to lift
-        clear), so Z moves first when it is heading toward 0 and last when
-        heading away: the tray lifts clear before travelling and travels
-        before lowering.
-        """
-        xy = {axis: target[axis] for axis in 'xy' if axis in target}
-        z = {'z': target['z']} if 'z' in target else {}
-        if z and z['z'] < self.pos()['z']:
-            groups = (z, xy)
-        else:
-            groups = (xy, z)
-        for group in groups:
-            if group:
-                self.move_to(group, speed, accel)
+        """move_to, but Z and XY never move at the same time (see safe_groups)."""
+        current_z = self.pos()['z'] if 'z' in target else 0.0
+        for group in safe_groups(current_z, target):
+            self.move_to(group, speed, accel)
 
     def estop(self):
         """Instant stop of every motor.  Drivers are disabled: re-home after."""
@@ -200,6 +216,169 @@ class Gantry:
             self.estop()
             self._log('motion interrupted: sent ! (estop); re-home before the next run')
         self._ser.close()
+
+
+# -- Scan plan (pure, no serial) -----------------------------------------------
+
+def _xyz(d, name, axes='xyz'):
+    try:
+        return {axis: float(d[axis]) for axis in axes}
+    except (KeyError, TypeError, ValueError):
+        raise ScanConfigError(f'{name} needs numeric {", ".join(axes)}') from None
+
+
+@dataclass
+class ScanConfig:
+    """Scan geometry and motion settings.  Lengths in mm, gantry frame."""
+
+    grid_offset: dict           # {x, y, z}: grid origin corner on the tray
+    microscope_offset: dict     # {x, y, z}: lens focal point
+    grid_size: dict             # {x, y}
+    travel_max: dict            # {x, y, z}: furthest safe gantry position
+    scan_origin: dict = None    # {x, y} first pattern point in the grid; None = centred
+    pitch_mm: float = 1.0
+    n_x: int = 2
+    n_y: int = 2
+    z_levels_mm: tuple = (0.0, 10.0, 20.0, 30.0, 40.0)
+    speed_mm_s: float = DEFAULT_SPEED_MM_S
+    accel_mm_s2: float = DEFAULT_ACCEL_MM_S2
+    settle_s: float = 0.5
+    pos_tolerance_mm: float = 0.001
+    calibrated: bool = False    # set true once the offsets are measured
+
+    @classmethod
+    def from_dict(cls, d):
+        try:
+            return cls(
+                grid_offset=_xyz(d['grid_offset'], 'grid_offset'),
+                microscope_offset=_xyz(d['microscope_offset'], 'microscope_offset'),
+                grid_size=_xyz(d['grid_size'], 'grid_size', 'xy'),
+                travel_max=_xyz(d['travel_max'], 'travel_max'),
+                scan_origin=(None if d.get('scan_origin') is None
+                             else _xyz(d['scan_origin'], 'scan_origin', 'xy')),
+                pitch_mm=float(d.get('pitch_mm', 1.0)),
+                n_x=int(d.get('n_x', 2)),
+                n_y=int(d.get('n_y', 2)),
+                z_levels_mm=tuple(float(z) for z in d.get(
+                    'z_levels_mm', cls.z_levels_mm)),
+                speed_mm_s=float(d.get('speed_mm_s', DEFAULT_SPEED_MM_S)),
+                accel_mm_s2=float(d.get('accel_mm_s2', DEFAULT_ACCEL_MM_S2)),
+                settle_s=float(d.get('settle_s', 0.5)),
+                pos_tolerance_mm=float(d.get('pos_tolerance_mm', 0.001)),
+                calibrated=bool(d.get('calibrated', False)),
+            )
+        except KeyError as e:
+            raise ScanConfigError(f'config is missing {e}') from None
+        except (TypeError, ValueError) as e:
+            raise ScanConfigError(f'bad config value: {e}') from None
+
+    @classmethod
+    def from_yaml(cls, path):
+        with open(path) as f:
+            return cls.from_dict(yaml.safe_load(f) or {})
+
+    def origin(self):
+        """First pattern point in grid coordinates (centred if not set)."""
+        if self.scan_origin is not None:
+            return self.scan_origin
+        return {axis: (self.grid_size[axis] - (n - 1) * self.pitch_mm) / 2
+                for axis, n in (('x', self.n_x), ('y', self.n_y))}
+
+
+@dataclass
+class ScanPoint:
+    index: int
+    iz: int
+    ix: int
+    iy: int
+    local: dict     # {x, y, z} in grid coordinates (z = z level)
+    target: dict    # {x, y, z} gantry position that puts local under the lens
+
+
+def _serpentine(n_x, n_y):
+    return [(ix, iy) for iy in range(n_y)
+            for ix in (range(n_x) if iy % 2 == 0 else reversed(range(n_x)))]
+
+
+def scan_points(cfg):
+    """All scan points in visiting order.
+
+    Z levels are the outer loop; XY is a serpentine that reverses on every
+    other level, so moving between levels is a Z-only move.
+    """
+    origin = cfg.origin()
+    xy_order = _serpentine(cfg.n_x, cfg.n_y)
+    points = []
+    for iz, z_level in enumerate(cfg.z_levels_mm):
+        for ix, iy in (xy_order if iz % 2 == 0 else xy_order[::-1]):
+            local = {'x': origin['x'] + ix * cfg.pitch_mm,
+                     'y': origin['y'] + iy * cfg.pitch_mm,
+                     'z': z_level}
+            target = {axis: cfg.microscope_offset[axis]
+                      - (cfg.grid_offset[axis] + local[axis]) for axis in 'xyz'}
+            points.append(ScanPoint(len(points), iz, ix, iy, local, target))
+    return points
+
+
+def validate(cfg, points):
+    """Raise ScanConfigError before any motion if the scan can't run safely."""
+    if cfg.n_x < 1 or cfg.n_y < 1 or cfg.pitch_mm <= 0 or not cfg.z_levels_mm:
+        raise ScanConfigError('need n_x, n_y >= 1, pitch_mm > 0 and at least one z level')
+    if not 0 < cfg.speed_mm_s <= MAX_SPEED_MM_S:
+        raise ScanConfigError(f'speed_mm_s must be in (0, {MAX_SPEED_MM_S}]')
+    if not 0 < cfg.accel_mm_s2 <= MAX_ACCEL_MM_S2:
+        raise ScanConfigError(f'accel_mm_s2 must be in (0, {MAX_ACCEL_MM_S2}]')
+    if cfg.settle_s < 0:
+        raise ScanConfigError('settle_s must be >= 0')
+    for p in points:
+        for axis in 'xy':
+            if not 0 <= p.local[axis] <= cfg.grid_size[axis]:
+                raise ScanConfigError(
+                    f'point {p.index} {axis}={p.local[axis]:.3f} is outside the '
+                    f'{cfg.grid_size[axis]:g} mm grid')
+        for axis in 'xyz':
+            if not 0 <= p.target[axis] <= cfg.travel_max[axis]:
+                raise ScanConfigError(
+                    f'point {p.index} target {axis}={p.target[axis]:.3f} is outside '
+                    f'travel 0..{cfg.travel_max[axis]:g} mm')
+
+
+def dry_run_lines(cfg, points, return_home=True):
+    """Printable scan plan with the g1 lines a scan from home would send."""
+    lines = [' #  lvl ix iy    local x/y/z (mm)          target X/Y/Z (mm)']
+    for p in points:
+        lines.append(
+            f'{p.index:2d}  {p.iz:3d} {p.ix:2d} {p.iy:2d}  '
+            f'{p.local["x"]:7.3f} {p.local["y"]:7.3f} {p.local["z"]:7.3f}   '
+            f'{p.target["x"]:7.3f} {p.target["y"]:7.3f} {p.target["z"]:7.3f}')
+
+    lines += ['', 'moves (after g28, from 0/0/0):']
+    current = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+    stops = [(f'#{p.index}', p.target) for p in points]
+    if return_home:
+        stops.append(('home', {'x': 0.0, 'y': 0.0, 'z': 0.0}))
+    for label, target in stops:
+        steps = []
+        for group in safe_groups(current['z'], target):
+            cmds = [move_mm_command(axis, mm - current[axis], cfg.speed_mm_s,
+                                    cfg.accel_mm_s2)
+                    for axis, mm in group.items()
+                    if abs(mm - current[axis]) >= HALF_STEP_MM]
+            if cmds:
+                steps.append(' + '.join(cmds))
+            current.update(group)
+        lines.append(f'  {label:>4}: ' + ('  then  '.join(steps) or '(no move)'))
+    return lines
+
+
+def default_config_path():
+    """Installed share/ copy if built with colcon, else the source tree's."""
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        path = Path(get_package_share_directory('astrobiology_actuators')) / 'config'
+    except Exception:   # not installed, or ROS not sourced
+        path = Path(__file__).resolve().parents[1] / 'config'
+    return path / CONFIG_NAME
 
 
 # -- CLI ----------------------------------------------------------------------
@@ -219,6 +398,18 @@ def _cmd_goto(gantry, args):
               if getattr(args, axis) is not None}
     gantry.move_safe(target, args.speed, args.accel)
     _cmd_pos(gantry, args)
+
+
+def _cmd_scan_dry_run(args):
+    cfg = ScanConfig.from_yaml(args.config)
+    points = scan_points(cfg)
+    validate(cfg, points)
+    print(f'config: {args.config}')
+    if not cfg.calibrated:
+        print('WARNING: calibrated: false -- offsets are placeholders')
+    print(f'{len(points)} points, speed {cfg.speed_mm_s:g} mm/s, '
+          f'accel {cfg.accel_mm_s2:g} mm/s^2\n')
+    print('\n'.join(dry_run_lines(cfg, points, return_home=not args.no_return)))
 
 
 def _axis(name):
@@ -248,6 +439,13 @@ def build_parser():
     p.add_argument('--speed', type=float, default=DEFAULT_SPEED_MM_S, help='mm/s')
     p.add_argument('--accel', type=float, default=DEFAULT_ACCEL_MM_S2, help='mm/s^2')
     p.set_defaults(func=_cmd_goto)
+    p = sub.add_parser('scan', help='run the microscope grid scan')
+    p.add_argument('--config', type=Path, default=None,
+                   help=f'scan config (default: installed {CONFIG_NAME})')
+    p.add_argument('--dry-run', action='store_true',
+                   help='print points and moves without opening the port')
+    p.add_argument('--no-return', action='store_true',
+                   help='stay at the last point instead of going back to 0/0/0')
     return parser
 
 
@@ -256,6 +454,16 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == 'goto' and (args.x, args.y, args.z) == (None, None, None):
         parser.error('goto needs at least one of --x, --y, --z')
+    if args.command == 'scan':
+        if not args.dry_run:
+            parser.error('only scan --dry-run is implemented so far')
+        args.config = args.config or default_config_path()
+        try:
+            _cmd_scan_dry_run(args)
+        except (OSError, yaml.YAMLError, ScanConfigError) as e:
+            print(f'error: {e}', file=sys.stderr)
+            return 1
+        return 0
 
     import serial
     try:

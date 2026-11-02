@@ -1,0 +1,33 @@
+# Microscope grid scan (microscope_scan scan).  Plain YAML, not ROS params.
+#
+# All lengths are mm in the gantry frame: home = the endstops = 0/0/0, and
+# positive moves away from them.  The gantry moves the cache tray under a fixed
+# microscope, so tray point p (grid coordinates) is under the lens at
+#     target = microscope_offset - (grid_offset + p)
+# Only microscope_offset - grid_offset matters: focus on the grid's origin
+# corner with 'microscope_scan goto', and 'microscope_scan pos' reads it.
+
+# Placeholders until measured on the machine.  The live scan refuses to run
+# while calibrated is false; --dry-run works either way.
+calibrated: false
+grid_offset:       {x: 0.0,  y: 0.0,  z: 0.0}   # grid origin corner on the tray
+microscope_offset: {x: 60.0, y: 60.0, z: 45.0}  # lens focal point
+travel_max:        {x: 100.0, y: 100.0, z: 50.0}  # furthest safe gantry position
+
+grid_size: {x: 50.0, y: 50.0}
+
+# 2 x 2 pattern at 1 mm pitch.  scan_origin is the first point in grid
+# coordinates, e.g. {x: 10.0, y: 10.0}; null centres the pattern in the grid.
+scan_origin: null
+pitch_mm: 1.0
+n_x: 2
+n_y: 2
+
+# Z levels relative to the grid's z.  Each level lowers the target Z (toward
+# the endstop); negate them if the levels should go the other way.
+z_levels_mm: [0.0, 10.0, 20.0, 30.0, 40.0]
+
+speed_mm_s: 5.0         # firmware max 31.25
+accel_mm_s2: 10.0       # firmware max 312.5
+settle_s: 0.5           # wait after each move before reading pos
+pos_tolerance_mm: 0.001 # warn if pos differs from target by more (1 step = 0.0003)
