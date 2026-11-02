@@ -258,7 +258,7 @@ class ScanConfig:
     calibrated: bool = False    # set true once the offsets are measured
     camera_enabled: bool = True
     camera_device: str = '/dev/video2'
-    image_dir: Path = Path('~')     # <image_prefix><n>.jpg, overwritten every run
+    image_dir: Path = Path('~/Pictures')    # <image_prefix><n>.jpg, overwritten every run
     image_prefix: str = 'test'
     skip_frames: int = 5            # frames dropped before the saved one (auto-exposure)
 
@@ -302,7 +302,7 @@ class ScanConfig:
         return {
             'camera_enabled': bool(cam.get('enabled', True)),
             'camera_device': str(cam.get('device', '/dev/video2')),
-            'image_dir': Path(str(cam.get('image_dir', '~'))),
+            'image_dir': Path(str(cam.get('image_dir', '~/Pictures'))),
             'image_prefix': str(cam.get('image_prefix', 'test')),
             'skip_frames': int(cam.get('skip_frames', 5)),
         }

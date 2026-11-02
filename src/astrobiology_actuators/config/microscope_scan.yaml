@@ -48,6 +48,6 @@ pos_tolerance_mm: 0.001 # warn if pos differs from target by more (1 step = 0.00
 camera:
   enabled: true
   device: /dev/video2   # check with: ls /dev/video*  (can renumber after a reboot)
-  image_dir: "~"
+  image_dir: "~/Pictures"
   image_prefix: test
   skip_frames: 5        # frames dropped before the saved one, for auto-exposure

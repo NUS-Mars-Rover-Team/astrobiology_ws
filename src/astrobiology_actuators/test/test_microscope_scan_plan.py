@@ -249,7 +249,7 @@ def test_camera_defaults_without_camera_block():
     cfg = make_cfg()
     assert cfg.camera_enabled is True
     assert cfg.camera_device == '/dev/video2'
-    assert cfg.image_path(3) == Path('~/test3.jpg').expanduser()
+    assert cfg.image_path(3) == Path('~/Pictures/test3.jpg').expanduser()
 
 
 def test_camera_block_is_read():
