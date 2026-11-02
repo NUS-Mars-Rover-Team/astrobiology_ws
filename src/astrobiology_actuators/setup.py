@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'pump_node = astrobiology_actuators.pump_node:main',
             'lights_node = astrobiology_actuators.lights_node:main',
+            'microscope_scan = astrobiology_actuators.microscope_scan:main',
         ],
     },
 )
