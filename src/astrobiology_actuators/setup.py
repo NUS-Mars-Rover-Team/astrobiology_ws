@@ -25,7 +25,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'pump_node = astrobiology_actuators.pump_node:main',
+            'steppers_node = astrobiology_actuators.steppers_node:main',
             'lights_node = astrobiology_actuators.lights_node:main',
             'microscope_scan = astrobiology_actuators.microscope_scan:main',
         ],

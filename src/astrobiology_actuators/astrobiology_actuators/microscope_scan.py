@@ -1,6 +1,6 @@
 """Microscope grid scan over the X/Y/Z gantry.  No ROS imports.
 
-Talks to the ESP32 stepper controller directly over serial, so pump_node
+Talks to the ESP32 stepper controller directly over serial, so steppers_node
 must NOT be running (it holds the same port).
 
 Subcommands:
@@ -621,7 +621,7 @@ def _axis(name):
 def build_parser():
     parser = argparse.ArgumentParser(
         prog='microscope_scan',
-        description='Gantry jog tools and microscope grid scan (stop pump_node first).')
+        description='Gantry jog tools and microscope grid scan (stop steppers_node first).')
     parser.add_argument('--port', default=DEFAULT_PORT)
     parser.add_argument('--baud', type=int, default=DEFAULT_BAUD)
     parser.add_argument('-v', '--verbose', action='store_true',

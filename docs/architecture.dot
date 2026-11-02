@@ -41,8 +41,8 @@ digraph astrobiology {
         color="#1565C0";
         fontcolor="#1565C0";
 
-        pump_node [
-            label="pump_node\n(astrobiology_actuators)"
+        steppers_node [
+            label="steppers_node\n(astrobiology_actuators)"
             shape=ellipse style=filled fillcolor="#BBDEFB"
         ];
         lights_node [
@@ -160,7 +160,7 @@ digraph astrobiology {
     }
 
     // ── Edges: hardware → nodes ──────────────────────────────
-    esp_steppers -> pump_node      [label="serial\n/dev/esp_steppers\n115200\ng1 protocol" style=bold color="#E65100"];
+    esp_steppers -> steppers_node      [label="serial\n/dev/esp_steppers\n115200\ng1 protocol" style=bold color="#E65100"];
     esp_lights   -> lights_node    [label="serial\n/dev/esp_lights\n115200\nNAME 0|1" style=bold color="#E65100"];
     spectro_cam  -> spectrum_node  [label="V4L2\n/dev/spectroscope" style=bold color="#E65100"];
 
@@ -172,18 +172,18 @@ digraph astrobiology {
     spectrum_topic -> spectrum_plot [label="sub" color="#2E7D32" style=dashed];
 
     // ── Edges: nodes → services ──────────────────────────────
-    pump_node -> pump_move       [label="server" color="#6A1B9A"];
-    pump_node -> pump_stop       [label="server" color="#6A1B9A"];
-    pump_node -> flush_move      [label="server" color="#6A1B9A"];
-    pump_node -> flush_stop      [label="server" color="#6A1B9A"];
-    pump_node -> centrifuge_move [label="server" color="#6A1B9A"];
-    pump_node -> centrifuge_stop [label="server" color="#6A1B9A"];
-    pump_node -> x_gantry_move   [label="server" color="#6A1B9A"];
-    pump_node -> x_gantry_stop   [label="server" color="#6A1B9A"];
-    pump_node -> y_gantry_move   [label="server" color="#6A1B9A"];
-    pump_node -> y_gantry_stop   [label="server" color="#6A1B9A"];
-    pump_node -> z_gantry_move   [label="server" color="#6A1B9A"];
-    pump_node -> z_gantry_stop   [label="server" color="#6A1B9A"];
+    steppers_node -> pump_move       [label="server" color="#6A1B9A"];
+    steppers_node -> pump_stop       [label="server" color="#6A1B9A"];
+    steppers_node -> flush_move      [label="server" color="#6A1B9A"];
+    steppers_node -> flush_stop      [label="server" color="#6A1B9A"];
+    steppers_node -> centrifuge_move [label="server" color="#6A1B9A"];
+    steppers_node -> centrifuge_stop [label="server" color="#6A1B9A"];
+    steppers_node -> x_gantry_move   [label="server" color="#6A1B9A"];
+    steppers_node -> x_gantry_stop   [label="server" color="#6A1B9A"];
+    steppers_node -> y_gantry_move   [label="server" color="#6A1B9A"];
+    steppers_node -> y_gantry_stop   [label="server" color="#6A1B9A"];
+    steppers_node -> z_gantry_move   [label="server" color="#6A1B9A"];
+    steppers_node -> z_gantry_stop   [label="server" color="#6A1B9A"];
 
     lights_node -> uv1_set      [label="server" color="#6A1B9A"];
     lights_node -> uv2_set      [label="server" color="#6A1B9A"];

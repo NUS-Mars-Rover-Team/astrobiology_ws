@@ -30,7 +30,7 @@ class PumpConfig:
 class PumpState:
     """State for a single peristaltic pump.
 
-    Not thread-safe; the caller (pump_node) serialises access with a lock.
+    Not thread-safe; the caller serialises access with a lock.
     """
 
     def __init__(self, config):

@@ -40,10 +40,10 @@ _OK_RE = re.compile(r'^ok\s+(\S+)\s+accepted')
 _ERR_BUSY_RE = re.compile(r'^error\s+busy:\s*(\S+)')
 
 
-class PumpNode(Node):
+class SteppersNode(Node):
 
     def __init__(self):
-        super().__init__('pump_node')
+        super().__init__('steppers_node')
 
         # Parameters
         self.declare_parameter('port', '/dev/esp_steppers')
@@ -212,7 +212,7 @@ class PumpNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = PumpNode()
+    node = SteppersNode()
     from rclpy.executors import MultiThreadedExecutor
     executor = MultiThreadedExecutor()
     executor.add_node(node)

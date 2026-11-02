@@ -97,10 +97,10 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ### Launch all stepper motors
 
 ```bash
-ros2 launch astrobiology_actuators pumps.launch.py
+ros2 launch astrobiology_actuators steppers.launch.py
 ```
 
-This starts `pump_node` with 12 services (move + stop for each of 6 motors).
+This starts `steppers_node` with 12 services (move + stop for each of 6 motors).
 
 ### Launch science lights
 
@@ -151,7 +151,7 @@ All lights are turned off automatically when the node shuts down.
 `microscope_scan` homes the gantry, steps the cache tray through a 2 × 2 grid at five Z levels,
 logs each position to a CSV and saves a picture at each point (`~/Pictures/test1.jpg` …
 `test20.jpg`). It also has `pos` / `home` / `goto` commands for jogging the gantry. It talks
-to the stepper ESP32 directly, so stop `pump_node` first.
+to the stepper ESP32 directly, so stop `steppers_node` first.
 
 ```bash
 ros2 run astrobiology_actuators microscope_scan --port /dev/ttyUSB1 scan --dry-run
@@ -165,10 +165,10 @@ Full guide (commands, config, coordinate model, viewing the pictures, troublesho
 
 All motors use the `StepperMove` service (`steps`, `speed_hz`, `accel_hz2`):
 
-> **Known issue:** `pump_node` forwards `steps`/`speed_hz`/`accel_hz2` to the firmware unchanged,
+> **Known issue:** `steppers_node` forwards `steps`/`speed_hz`/`accel_hz2` to the firmware unchanged,
 > but the current firmware reads the gantry axes in mm, mm/s and mm/s², and the centrifuge in
 > rev, RPM and RPM/s. The x/y/z gantry and centrifuge services therefore move by the wrong
-> amount, or are rejected as out of range. Until `pump_node` is updated, move the gantry with
+> amount, or are rejected as out of range. Until `steppers_node` is updated, move the gantry with
 > `microscope_scan goto`. Pump and flush are still raw pulses and unaffected.
 
 ```bash
@@ -316,7 +316,7 @@ error line too long or invalid; discarded        Line contained control bytes (e
 
 ```bash
 # Stepper motor, lights and microscope_scan tests (no ROS or hardware needed)
-python -m pytest src/astrobiology_actuators/test/ -v
+cd src/astrobiology_actuators && python3 -m pytest test/ -v
 
 # Spectrometer processing tests
 colcon test --packages-select spectro_cam && colcon test-result --verbose
@@ -324,7 +324,7 @@ colcon test --packages-select spectro_cam && colcon test-result --verbose
 
 ## Direct serial debugging
 
-If you need to bypass ROS and talk to the ESP32 directly (stop `pump_node` first):
+If you need to bypass ROS and talk to the ESP32 directly (stop `steppers_node` first):
 
 ```bash
 picocom -b 115200 --echo --imap lfcrlf /dev/esp_steppers   # quit: Ctrl+A then Ctrl+X

@@ -4,7 +4,7 @@
 several Z levels. At each point it stops, logs the position and takes a picture with the Pi
 camera (`test1.jpg` … `test20.jpg`). It also has commands for jogging the gantry by hand.
 
-The script talks to the stepper ESP32 directly over serial. It doesn't use ROS, so **`pump_node`
+The script talks to the stepper ESP32 directly over serial. It doesn't use ROS, so **`steppers_node`
 must be stopped while you use it**, because both open the same port.
 
 Source: [`src/astrobiology_actuators/astrobiology_actuators/microscope_scan.py`](../src/astrobiology_actuators/astrobiology_actuators/microscope_scan.py)
@@ -203,7 +203,7 @@ After that, `--port` can be dropped.
 
 | Symptom | Cause / fix |
 |---|---|
-| `error: no reply within 2.0 s` on `ms pos` | Wrong port (probably the Raman adapter on `ttyUSB0`); use `--port /dev/ttyUSB1`. Also check nothing else has the port open: `fuser -v /dev/ttyUSB1` (a leftover `screen`/`picocom`, or `pump_node`) |
+| `error: no reply within 2.0 s` on `ms pos` | Wrong port (probably the Raman adapter on `ttyUSB0`); use `--port /dev/ttyUSB1`. Also check nothing else has the port open: `fuser -v /dev/ttyUSB1` (a leftover `screen`/`picocom`, or `steppers_node`) |
 | `error line too long or invalid; discarded` when typing in picocom | The firmware rejects any line containing control bytes. picocom sends Backspace and arrow keys as raw bytes, so retype the whole line without corrections |
 | `< (boot) error line too long …` with `-v` | Harmless: a junk byte when the port opens. The script clears it before the first command |
 | `error homing failed <axis>: endstop not found …` | Check the endstop in picocom with `status x` (released → `open`, pressed → `TRIGGERED`). X/Y are on GPIO35/34, which have no internal pull resistor; with the HIGH trigger level they need an external pull-down |
@@ -226,7 +226,7 @@ instant emergency stop of every motor, even in the middle of a line.
 The tests use a fake serial port and a fake camera, so they need no hardware:
 
 ```bash
-python3 -m pytest src/astrobiology_actuators/test/ -q
+cd src/astrobiology_actuators && python3 -m pytest test/ -q
 ```
 
 - `test_microscope_scan.py`: the serial link (`pos`, `home`, `move_to`, timeouts, emergency stop

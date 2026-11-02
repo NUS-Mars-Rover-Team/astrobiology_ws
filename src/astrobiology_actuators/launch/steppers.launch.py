@@ -7,7 +7,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def _pump_node(context):
+def _steppers_node(context):
     parameters = [LaunchConfiguration('config').perform(context)]
     dry_run = LaunchConfiguration('dry_run').perform(context)
     if dry_run:
@@ -15,8 +15,8 @@ def _pump_node(context):
     return [
         Node(
             package='astrobiology_actuators',
-            executable='pump_node',
-            name='pump_node',
+            executable='steppers_node',
+            name='steppers_node',
             parameters=parameters,
             output='screen',
         )
@@ -25,12 +25,12 @@ def _pump_node(context):
 
 def generate_launch_description():
     default_config = os.path.join(
-        get_package_share_directory('astrobiology_actuators'), 'config', 'pumps.yaml'
+        get_package_share_directory('astrobiology_actuators'), 'config', 'steppers.yaml'
     )
     return LaunchDescription([
         DeclareLaunchArgument('config', default_value=default_config,
-                              description='Pump parameter YAML file'),
+                              description='Stepper node parameter YAML file'),
         DeclareLaunchArgument('dry_run', default_value='',
                               description='Override dry_run (true/false); empty uses the YAML value'),
-        OpaqueFunction(function=_pump_node),
+        OpaqueFunction(function=_steppers_node),
     ])
