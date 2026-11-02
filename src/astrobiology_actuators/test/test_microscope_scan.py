@@ -1,5 +1,7 @@
 import pytest
 
+from astrobiology_actuators import microscope_scan
+
 from astrobiology_actuators.microscope_scan import Gantry, GantryError, build_parser
 
 
@@ -118,3 +120,91 @@ def test_cli_home_axes():
 def test_cli_home_rejects_bad_axis():
     with pytest.raises(SystemExit):
         build_parser().parse_args(['home', 'c'])
+
+
+POS_ORIGIN = ['pos Z:0.0000 Y:0.0000 X:0.0000 C:0.0000 P:0 F:0']
+
+
+def g1_lines(ser):
+    return [w.decode().strip() for w in ser.written if w.startswith(b'g1')]
+
+
+def test_move_to_sends_relative_mm_and_waits_for_done():
+    g, ser = make_gantry({
+        'pos': POS_ORIGIN,
+        'g1 x 1 5 10': ['ok x accepted', 'done x steps=3200 pos=1.0000']})
+    g.move_to({'x': 1.0}, speed=5, accel=10)
+    assert g1_lines(ser) == ['g1 x 1 5 10']
+    g.close()
+    assert b'!' not in ser.written
+
+
+def test_move_to_is_relative_to_current_position():
+    g, ser = make_gantry({
+        'pos': ['pos Z:0.0000 Y:0.0000 X:2.0000'],
+        'g1 x -1 5 10': ['ok x accepted', 'done x steps=3200 pos=1.0000']})
+    g.move_to({'x': 1.0})
+    assert g1_lines(ser) == ['g1 x -1 5 10']
+
+
+def test_move_to_waits_for_every_axis():
+    g, ser = make_gantry({
+        'pos': POS_ORIGIN,
+        'g1 x 1 5 10': ['ok x accepted'],
+        'g1 y 2 5 10': ['ok y accepted', 'done y steps=6400 pos=2.0000',
+                        'done x steps=3200 pos=1.0000']})
+    g.move_to({'x': 1.0, 'y': 2.0})
+    assert g1_lines(ser) == ['g1 x 1 5 10', 'g1 y 2 5 10']
+
+
+def test_move_to_skips_axes_already_there():
+    g, ser = make_gantry({'pos': ['pos Z:3.0000 Y:0.0000 X:1.0001']})
+    g.move_to({'x': 1.0, 'z': 3.0})
+    assert g1_lines(ser) == []
+
+
+def test_move_to_times_out_and_estops(monkeypatch):
+    monkeypatch.setattr(microscope_scan, 'MOVE_MARGIN_S', 0.0)
+    g, ser = make_gantry({
+        'pos': POS_ORIGIN,
+        'g1 x 0.01 30 300': ['ok x accepted']})     # never reports done
+    with pytest.raises(GantryError, match='no reply'):
+        g.move_to({'x': 0.01}, speed=30, accel=300)
+    g.close()
+    assert ser.written[-1] == b'!'
+
+
+def test_move_to_raises_on_busy():
+    g, ser = make_gantry({'pos': POS_ORIGIN, 'g1 x 1 5 10': ['error busy: x']})
+    with pytest.raises(GantryError, match='busy'):
+        g.move_to({'x': 1.0})
+
+
+def test_move_to_raises_on_stopped():
+    g, _ = make_gantry({'pos': POS_ORIGIN,
+                        'g1 x 1 5 10': ['ok x accepted', 'stopped x steps=100 pos=0.0313']})
+    with pytest.raises(GantryError, match='stopped'):
+        g.move_to({'x': 1.0})
+
+
+@pytest.mark.parametrize('target, speed, accel', [
+    ({'x': -0.5}, 5, 10),       # behind the endstop
+    ({'x': 1.0}, 40, 10),       # over 31.25 mm/s
+    ({'x': 1.0}, 5, 0),
+])
+def test_move_to_rejects_before_sending(target, speed, accel):
+    g, ser = make_gantry({'pos': POS_ORIGIN})
+    with pytest.raises(GantryError):
+        g.move_to(target, speed, accel)
+    assert ser.written == [b'\n']
+
+
+def test_cli_goto_requires_an_axis(capsys):
+    with pytest.raises(SystemExit):
+        microscope_scan.main(['goto'])
+    assert 'at least one' in capsys.readouterr().err
+
+
+def test_cli_goto_parses_axes():
+    args = build_parser().parse_args(['goto', '--x', '1', '--z', '2.5', '--speed', '2'])
+    assert (args.x, args.y, args.z, args.speed, args.accel) == (1.0, None, 2.5, 2.0, 10.0)

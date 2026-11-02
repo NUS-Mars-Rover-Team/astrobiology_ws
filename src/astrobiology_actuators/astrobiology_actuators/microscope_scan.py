@@ -6,6 +6,7 @@ must NOT be running (it holds the same port).
 Subcommands:
     microscope_scan pos          print the gantry X/Y/Z position in mm
     microscope_scan home [x y z] home onto the endstops (firmware order Z, Y, X)
+    microscope_scan goto --x 1   absolute move in mm (axes not given stay put)
 """
 
 import argparse
@@ -13,19 +14,30 @@ import sys
 import time
 
 from astrobiology_actuators.serial_commands import (
+    DONE_RE,
     ESTOP_CHAR,
     home_command,
+    move_mm_command,
     parse_pos,
     pos_command,
 )
 
 DEFAULT_PORT = '/dev/esp_steppers'
 DEFAULT_BAUD = 115200
-BOOT_WAIT_S = 2.0       # opening the port resets the ESP32; wait out its banner
+BOOT_WAIT_S = 2.0       # opening the port may reset the ESP32; wait out its banner
 FLUSH_DRAIN_S = 0.2
 POS_TIMEOUT_S = 2.0
 # Firmware worst case per axis: 1,000,000-step search at 10 kHz = 100 s, plus backoffs
 HOME_TIMEOUT_PER_AXIS_S = 120.0
+MOVE_MARGIN_S = 2.0     # added to the estimated move time before giving up
+
+# Firmware limits: 3200 steps/mm, 1..100000 steps/s, 1..1000000 steps/s^2
+STEPS_PER_MM = 3200.0
+HALF_STEP_MM = 0.5 / STEPS_PER_MM
+MAX_SPEED_MM_S = 100000 / STEPS_PER_MM      # 31.25
+MAX_ACCEL_MM_S2 = 1000000 / STEPS_PER_MM    # 312.5
+DEFAULT_SPEED_MM_S = 5.0
+DEFAULT_ACCEL_MM_S2 = 10.0
 
 # Reply prefixes (lower-cased) that mean the firmware rejected or aborted something
 _FAULT_PREFIXES = ('error', 'aborted', 'estop')
@@ -120,6 +132,45 @@ class Gantry:
                             HOME_TIMEOUT_PER_AXIS_S * (len(axes) or 3))
         self._moving = False
 
+    def move_to(self, target, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2):
+        """Move the axes in target ({'x': mm, ...}) to those absolute positions.
+
+        All listed axes start together; returns once every one reports done.
+        Axes already within half a step of their target aren't commanded.
+        """
+        if not 0 < speed <= MAX_SPEED_MM_S:
+            raise GantryError(f'speed must be in (0, {MAX_SPEED_MM_S}] mm/s')
+        if not 0 < accel <= MAX_ACCEL_MM_S2:
+            raise GantryError(f'accel must be in (0, {MAX_ACCEL_MM_S2}] mm/s^2')
+        for axis, mm in target.items():
+            if mm < 0:
+                raise GantryError(f'{axis}={mm} is behind the endstop (home = 0)')
+
+        current = self.pos()
+        deltas = {axis: mm - current[axis] for axis, mm in target.items()
+                  if abs(mm - current[axis]) >= HALF_STEP_MM}
+        if not deltas:
+            return
+
+        self._moving = True
+        for axis, delta in deltas.items():
+            self.send(move_mm_command(axis, delta, speed, accel))
+
+        pending = set(deltas)
+
+        def all_done(line):
+            if line.startswith(('stopped', 'cancelled')):
+                raise GantryError(line)
+            m = DONE_RE.match(line)
+            if m:
+                pending.discard(m.group(1))
+            return True if not pending else None
+
+        # Cruise time plus one accel and one decel ramp
+        timeout = max(map(abs, deltas.values())) / speed + speed / accel + MOVE_MARGIN_S
+        self.readline_until(all_done, timeout)
+        self._moving = False
+
     def estop(self):
         """Instant stop of every motor.  Drivers are disabled: re-home after."""
         self._ser.write(ESTOP_CHAR)
@@ -144,6 +195,13 @@ def _cmd_home(gantry, args):
     _cmd_pos(gantry, args)
 
 
+def _cmd_goto(gantry, args):
+    target = {axis: getattr(args, axis) for axis in 'xyz'
+              if getattr(args, axis) is not None}
+    gantry.move_to(target, args.speed, args.accel)
+    _cmd_pos(gantry, args)
+
+
 def _axis(name):
     # A type check, not choices=: Python 3.10 argparse rejects an empty
     # nargs='*' list against choices, so a bare 'home' would fail to parse.
@@ -165,11 +223,20 @@ def build_parser():
     p = sub.add_parser('home', help='home onto the endstops (default: all axes)')
     p.add_argument('axes', nargs='*', type=_axis, metavar='{x,y,z}')
     p.set_defaults(func=_cmd_home)
+    p = sub.add_parser('goto', help='absolute move in mm (axes not given stay put)')
+    for axis in 'xyz':
+        p.add_argument(f'--{axis}', type=float, metavar='MM')
+    p.add_argument('--speed', type=float, default=DEFAULT_SPEED_MM_S, help='mm/s')
+    p.add_argument('--accel', type=float, default=DEFAULT_ACCEL_MM_S2, help='mm/s^2')
+    p.set_defaults(func=_cmd_goto)
     return parser
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == 'goto' and (args.x, args.y, args.z) == (None, None, None):
+        parser.error('goto needs at least one of --x, --y, --z')
 
     import serial
     try:
