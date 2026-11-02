@@ -9,6 +9,7 @@ Subcommands:
     microscope_scan goto --x 1   absolute move in mm (axes not given stay put);
                                  Z moves alone: first toward 0, last away from 0
     microscope_scan scan             home, visit every point, log pos to a CSV
+                                     and grab a camera frame (test1.jpg ...)
     microscope_scan scan --dry-run   print the scan points and moves (no port)
 
 Scan geometry (config/microscope_scan.yaml): the gantry moves the cache tray
@@ -23,6 +24,8 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import time
 
@@ -55,6 +58,7 @@ DEFAULT_SPEED_MM_S = 5.0
 DEFAULT_ACCEL_MM_S2 = 10.0
 
 CONFIG_NAME = 'microscope_scan.yaml'
+CAPTURE_TIMEOUT_S = 20.0
 
 # Reply prefixes (lower-cased) that mean the firmware rejected or aborted something
 _FAULT_PREFIXES = ('error', 'aborted', 'estop')
@@ -252,10 +256,16 @@ class ScanConfig:
     settle_s: float = 0.5
     pos_tolerance_mm: float = 0.001
     calibrated: bool = False    # set true once the offsets are measured
+    camera_enabled: bool = True
+    camera_device: str = '/dev/video2'
+    image_dir: Path = Path('~')     # <image_prefix><n>.jpg, overwritten every run
+    image_prefix: str = 'test'
+    skip_frames: int = 5            # frames dropped before the saved one (auto-exposure)
 
     def __post_init__(self):
         if self.travel_min is None:
             self.travel_min = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        self.image_dir = Path(self.image_dir).expanduser()
 
     @classmethod
     def from_dict(cls, d):
@@ -280,16 +290,31 @@ class ScanConfig:
                 settle_s=float(d.get('settle_s', 0.5)),
                 pos_tolerance_mm=float(d.get('pos_tolerance_mm', 0.001)),
                 calibrated=bool(d.get('calibrated', False)),
+                **cls._camera_fields(d.get('camera') or {}),
             )
         except KeyError as e:
             raise ScanConfigError(f'config is missing {e}') from None
         except (TypeError, ValueError) as e:
             raise ScanConfigError(f'bad config value: {e}') from None
 
+    @staticmethod
+    def _camera_fields(cam):
+        return {
+            'camera_enabled': bool(cam.get('enabled', True)),
+            'camera_device': str(cam.get('device', '/dev/video2')),
+            'image_dir': Path(str(cam.get('image_dir', '~'))),
+            'image_prefix': str(cam.get('image_prefix', 'test')),
+            'skip_frames': int(cam.get('skip_frames', 5)),
+        }
+
     @classmethod
     def from_yaml(cls, path):
         with open(path) as f:
             return cls.from_dict(yaml.safe_load(f) or {})
+
+    def image_path(self, n):
+        """Path of the n-th picture (1-based, in scan order)."""
+        return self.image_dir / f'{self.image_prefix}{n}.jpg'
 
     def origin(self):
         """First pattern point in grid coordinates (centred if not set)."""
@@ -389,12 +414,14 @@ def scan_moves(points, return_home=True):
 
 def dry_run_lines(cfg, points, return_home=True):
     """Printable scan plan with the g1 lines a scan from home would send."""
-    lines = [' #  lvl ix iy    local x/y/z (mm)          target X/Y/Z (mm)']
+    lines = [' #  lvl ix iy    local x/y/z (mm)          target X/Y/Z (mm)'
+             + ('        image' if cfg.camera_enabled else '')]
     for p in points:
         lines.append(
             f'{p.index:2d}  {p.iz:3d} {p.ix:2d} {p.iy:2d}  '
             f'{p.local["x"]:7.3f} {p.local["y"]:7.3f} {p.local["z"]:7.3f}   '
-            f'{p.target["x"]:7.3f} {p.target["y"]:7.3f} {p.target["z"]:7.3f}')
+            f'{p.target["x"]:7.3f} {p.target["y"]:7.3f} {p.target["z"]:7.3f}'
+            + (f'   {cfg.image_path(p.index + 1).name}' if cfg.camera_enabled else ''))
 
     lines += ['', 'moves (after g28, from 0/0/0):']
     current = dict(HOME)
@@ -412,18 +439,64 @@ def dry_run_lines(cfg, points, return_home=True):
     return lines
 
 
+def ffmpeg_command(device, path, skip_frames=0):
+    """ffmpeg command that saves one frame from a V4L2 camera to path."""
+    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'v4l2', '-i', device]
+    if skip_frames > 0:
+        cmd += ['-vf', f'select=gte(n\\,{skip_frames})']
+    return cmd + ['-frames:v', '1', str(path)]
+
+
+def capture_image(device, path, skip_frames=0):
+    """Save one camera frame to path.  Returns None, or why it failed.
+
+    Never raises: a failed picture is only a warning during a scan.  Any old
+    file at path is removed first so a failure can't leave a previous run's
+    picture behind under this run's name.
+    """
+    path = Path(path)
+    try:
+        path.unlink(missing_ok=True)
+        result = subprocess.run(ffmpeg_command(device, path, skip_frames),
+                                capture_output=True, text=True, timeout=CAPTURE_TIMEOUT_S)
+    except FileNotFoundError:
+        return 'ffmpeg not found'
+    except subprocess.TimeoutExpired:
+        return f'ffmpeg timed out after {CAPTURE_TIMEOUT_S:g} s'
+    except OSError as e:
+        return str(e)
+    if result.returncode != 0:
+        last = (result.stderr.strip().splitlines() or ['no output'])[-1]
+        return f'ffmpeg exit {result.returncode}: {last}'
+    if not path.exists():
+        return 'ffmpeg wrote no file'
+    return None
+
+
+def camera_capture(cfg):
+    """capture(n) -> (path, error) for run_scan, from the config's camera settings."""
+    def capture(n):
+        path = cfg.image_path(n)
+        return path, capture_image(cfg.camera_device, path, cfg.skip_frames)
+    return capture
+
+
 CSV_FIELDS = (
     'index', 'iz', 'ix', 'iy', 'local_x', 'local_y', 'local_z',
     'target_x', 'target_y', 'target_z', 'pos_x', 'pos_y', 'pos_z',
-    'error_mm', 'timestamp',
+    'error_mm', 'image', 'timestamp',
 )
 
 
-def run_scan(gantry, cfg, points, csv_file, home=True, return_home=True, log=print):
+def run_scan(gantry, cfg, points, csv_file, home=True, return_home=True,
+             capture=None, log=print):
     """Move through every point, read pos after settling and log a CSV row.
 
-    csv_file is an open text file; rows are flushed as they are written so a
-    Ctrl-C keeps everything recorded so far.
+    capture(n) -> (path, error), if given, is called at every point (n is
+    1-based, in scan order) while the gantry is stationary; a failure is
+    logged as a warning and the scan carries on.  csv_file is an open text
+    file; rows are flushed as they are written so a Ctrl-C keeps everything
+    recorded so far.
     """
     writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
     writer.writeheader()
@@ -439,17 +512,26 @@ def run_scan(gantry, cfg, points, csv_file, home=True, return_home=True, log=pri
         time.sleep(cfg.settle_s)
         pos = gantry.pos()
         error = max(abs(pos[axis] - p.target[axis]) for axis in 'xyz')
+        image = ''
+        if capture is not None:
+            path, failure = capture(p.index + 1)
+            if failure:
+                log(f'{label:>4} WARNING image failed: {failure}')
+            else:
+                image = str(path)
         writer.writerow({
             'index': p.index, 'iz': p.iz, 'ix': p.ix, 'iy': p.iy,
             **{f'local_{k}': f'{v:.4f}' for k, v in p.local.items()},
             **{f'target_{k}': f'{v:.4f}' for k, v in p.target.items()},
             **{f'pos_{k}': f'{v:.4f}' for k, v in pos.items()},
             'error_mm': f'{error:.4f}',
+            'image': image,
             'timestamp': datetime.now().isoformat(timespec='milliseconds'),
         })
         csv_file.flush()
         log(f'{label:>4}/{len(points)}  ({p.ix},{p.iy}) lvl {p.iz}  '
             f'X {pos["x"]:.4f}  Y {pos["y"]:.4f}  Z {pos["z"]:.4f}'
+            + (f'  -> {Path(image).name}' if image else '')
             + (f'  WARNING off target by {error:.4f} mm'
                if error > cfg.pos_tolerance_mm else ''))
 
@@ -487,13 +569,34 @@ def _load_scan(args):
     cfg = ScanConfig.from_yaml(args.config)
     if args.z_levels:
         cfg.z_levels_mm = tuple(args.z_levels)
+    if args.no_images:
+        cfg.camera_enabled = False
+    if args.camera:
+        cfg.camera_device = args.camera
+    if args.image_dir:
+        cfg.image_dir = args.image_dir.expanduser()
     points = scan_points(cfg)
     validate(cfg, points)
     print(f'config: {args.config}')
     print(f'{len(points)} points, Z levels {", ".join(f"{z:g}" for z in cfg.z_levels_mm)} mm '
           f'(+ z_offset {cfg.z_offset_mm:g}), speed {cfg.speed_mm_s:g} mm/s, '
           f'accel {cfg.accel_mm_s2:g} mm/s^2')
+    if cfg.camera_enabled:
+        print(f'images: {cfg.image_path(1)} .. {cfg.image_path(len(points)).name} '
+              f'from {cfg.camera_device} (overwritten)')
+    else:
+        print('images: off')
     return cfg, points
+
+
+def _check_camera(cfg):
+    """Fail before any motion if pictures can't possibly be taken."""
+    if shutil.which('ffmpeg') is None:
+        raise ScanConfigError('ffmpeg not found (sudo apt install ffmpeg), or use --no-images')
+    if not Path(cfg.camera_device).exists():
+        raise ScanConfigError(f'camera {cfg.camera_device} not found '
+                              '(ls /dev/video*; pick one with --camera), or use --no-images')
+    cfg.image_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _cmd_scan(gantry, args):
@@ -502,7 +605,8 @@ def _cmd_scan(gantry, args):
     print(f'logging to {out}')
     with open(out, 'w', newline='') as f:
         run_scan(gantry, args.cfg, args.points, f,
-                 home=not args.skip_home, return_home=not args.no_return)
+                 home=not args.skip_home, return_home=not args.no_return,
+                 capture=camera_capture(args.cfg) if args.cfg.camera_enabled else None)
     print(f'done: {len(args.points)} points logged to {out}')
 
 
@@ -546,6 +650,11 @@ def build_parser():
                    help='override z_levels_mm from the config, e.g. --z-levels 0 1 2')
     p.add_argument('--out', type=Path, default=None,
                    help='CSV path (default: scans/microscope_scan_<time>.csv)')
+    p.add_argument('--no-images', action='store_true', help="don't take pictures")
+    p.add_argument('--camera', metavar='DEVICE',
+                   help='camera device, overriding the config (e.g. /dev/video2)')
+    p.add_argument('--image-dir', type=Path, metavar='DIR',
+                   help='where test1.jpg ... go, overriding the config')
     p.set_defaults(func=_cmd_scan)
     return parser
 
@@ -571,6 +680,12 @@ def main(argv=None):
             print(f'error: calibrated is false in {args.config}; check the offsets '
                   'with --dry-run, then set it to true', file=sys.stderr)
             return 1
+        if args.cfg.camera_enabled:
+            try:
+                _check_camera(args.cfg)
+            except (OSError, ScanConfigError) as e:
+                print(f'error: {e}', file=sys.stderr)
+                return 1
 
     try:
         with Gantry(args.port, args.baud, verbose=args.verbose) as gantry:

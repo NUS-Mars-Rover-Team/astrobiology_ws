@@ -1,6 +1,7 @@
 import csv
 import io
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -9,7 +10,9 @@ from astrobiology_actuators.microscope_scan import (
     CSV_FIELDS,
     ScanConfig,
     ScanConfigError,
+    capture_image,
     dry_run_lines,
+    ffmpeg_command,
     run_scan,
     safe_groups,
     scan_moves,
@@ -238,3 +241,128 @@ def test_cli_rejects_levels_beyond_travel(capsys):
     assert microscope_scan.main(['scan', '--dry-run', '--config', str(CONFIG_YAML),
                                  '--z-levels', '0', '10']) == 1
     assert 'outside travel' in capsys.readouterr().err
+
+
+# -- camera ------------------------------------------------------------------------
+
+def test_camera_defaults_without_camera_block():
+    cfg = make_cfg()
+    assert cfg.camera_enabled is True
+    assert cfg.camera_device == '/dev/video2'
+    assert cfg.image_path(3) == Path('~/test3.jpg').expanduser()
+
+
+def test_camera_block_is_read():
+    cfg = make_cfg(camera={'enabled': False, 'device': '/dev/video0',
+                           'image_dir': '/tmp/shots', 'image_prefix': 'img',
+                           'skip_frames': 0})
+    assert (cfg.camera_enabled, cfg.camera_device, cfg.skip_frames) == (False, '/dev/video0', 0)
+    assert cfg.image_path(20) == Path('/tmp/shots/img20.jpg')
+
+
+def test_ffmpeg_command():
+    assert ffmpeg_command('/dev/video2', 'test1.jpg') == [
+        'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'v4l2', '-i', '/dev/video2', '-frames:v', '1', 'test1.jpg']
+    cmd = ffmpeg_command('/dev/video2', 'test1.jpg', skip_frames=5)
+    assert cmd[cmd.index('-vf') + 1] == r'select=gte(n\,5)'
+
+
+class FakeRun:
+    def __init__(self, returncode=0, stderr='', write=True, exc=None):
+        self.returncode, self.stderr, self.write, self.exc = returncode, stderr, write, exc
+        self.cmds = []
+
+    def __call__(self, cmd, **kwargs):
+        self.cmds.append(cmd)
+        if self.exc:
+            raise self.exc
+        if self.write and self.returncode == 0:
+            Path(cmd[-1]).write_bytes(b'jpg')
+        return subprocess.CompletedProcess(cmd, self.returncode, '', self.stderr)
+
+
+def test_capture_image_success_replaces_old_file(tmp_path, monkeypatch):
+    path = tmp_path / 'test1.jpg'
+    path.write_bytes(b'old')
+    monkeypatch.setattr(microscope_scan.subprocess, 'run', FakeRun())
+    assert capture_image('/dev/video2', path, 5) is None
+    assert path.read_bytes() == b'jpg'
+
+
+@pytest.mark.parametrize('fake, match', [
+    (FakeRun(returncode=1, stderr='junk\n/dev/video2: Device or resource busy\n'),
+     'exit 1: /dev/video2: Device or resource busy'),
+    (FakeRun(exc=subprocess.TimeoutExpired('ffmpeg', 20)), 'timed out'),
+    (FakeRun(exc=FileNotFoundError()), 'ffmpeg not found'),
+    (FakeRun(write=False), 'wrote no file'),
+])
+def test_capture_image_failures_return_a_reason(tmp_path, monkeypatch, fake, match):
+    path = tmp_path / 'test1.jpg'
+    path.write_bytes(b'stale picture from the last run')
+    monkeypatch.setattr(microscope_scan.subprocess, 'run', fake)
+    reason = capture_image('/dev/video2', path)
+    assert reason is not None and match in reason
+    assert not path.exists()
+
+
+def test_run_scan_captures_at_every_point(no_settle):
+    cfg = make_cfg()
+    calls = []
+
+    def capture(n):
+        calls.append(n)
+        return Path(f'/tmp/test{n}.jpg'), None
+
+    out, logs = io.StringIO(), []
+    run_scan(FakeGantry(), cfg, scan_points(cfg), out, capture=capture, log=logs.append)
+    assert calls == list(range(1, 21))
+    rows = list(csv.DictReader(io.StringIO(out.getvalue())))
+    assert [row['image'] for row in rows] == [f'/tmp/test{n}.jpg' for n in range(1, 21)]
+    assert '-> test1.jpg' in logs[1]
+
+
+def test_run_scan_keeps_going_when_capture_fails(no_settle):
+    cfg = make_cfg()
+    gantry, out, logs = FakeGantry(), io.StringIO(), []
+    run_scan(gantry, cfg, scan_points(cfg), out,
+             capture=lambda n: (Path(f'test{n}.jpg'), 'ffmpeg exit 1: busy'), log=logs.append)
+    rows = list(csv.DictReader(io.StringIO(out.getvalue())))
+    assert len(rows) == 20 and all(row['image'] == '' for row in rows)
+    assert sum('WARNING image failed: ffmpeg exit 1: busy' in line for line in logs) == 20
+    assert gantry.position == {'x': 0.0, 'y': 0.0, 'z': 0.0}
+
+
+def test_dry_run_lists_image_names():
+    cfg = make_cfg()
+    lines = dry_run_lines(cfg, scan_points(cfg))
+    assert lines[0].endswith('image')
+    assert lines[1].endswith('test1.jpg') and lines[20].endswith('test20.jpg')
+
+
+class GantryReached(Exception):
+    pass
+
+
+def _no_gantry(*args, **kwargs):
+    raise GantryReached
+
+
+def test_cli_missing_camera_is_refused_before_motion(monkeypatch, capsys):
+    monkeypatch.setattr(microscope_scan, 'Gantry', _no_gantry)
+    monkeypatch.setattr(microscope_scan.shutil, 'which', lambda name: '/usr/bin/ffmpeg')
+    assert microscope_scan.main(['scan', '--config', str(CONFIG_YAML),
+                                 '--camera', '/dev/no_such_video']) == 1
+    assert 'camera /dev/no_such_video not found' in capsys.readouterr().err
+
+
+def test_cli_no_images_skips_camera_checks(monkeypatch, capsys):
+    monkeypatch.setattr(microscope_scan, 'Gantry', _no_gantry)
+
+    def which(name):
+        raise AssertionError('camera checks should be skipped')
+
+    monkeypatch.setattr(microscope_scan.shutil, 'which', which)
+    with pytest.raises(GantryReached):
+        microscope_scan.main(['scan', '--config', str(CONFIG_YAML), '--no-images'])
+    assert 'images: off' in capsys.readouterr().out

@@ -41,3 +41,13 @@ speed_mm_s: 5.0         # firmware max 31.25
 accel_mm_s2: 10.0       # firmware max 312.5
 settle_s: 0.5           # wait after each move before reading pos
 pos_tolerance_mm: 0.001 # warn if pos differs from target by more (1 step = 0.0003)
+
+# A picture at every point: <image_dir>/<image_prefix>1.jpg ... in scan order
+# (test1-5 = the Z levels at the first X/Y position, test6-10 the next, ...).
+# Overwritten every run.  If a capture fails the scan warns and carries on.
+camera:
+  enabled: true
+  device: /dev/video2   # check with: ls /dev/video*  (can renumber after a reboot)
+  image_dir: "~"
+  image_prefix: test
+  skip_frames: 5        # frames dropped before the saved one, for auto-exposure
