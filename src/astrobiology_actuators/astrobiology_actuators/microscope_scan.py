@@ -303,14 +303,14 @@ def _serpentine(n_x, n_y):
 def scan_points(cfg):
     """All scan points in visiting order.
 
-    Z levels are the outer loop; XY is a serpentine that reverses on every
-    other level, so moving between levels is a Z-only move.
+    XY is the outer loop (a serpentine, so each XY hop is one pitch) and the
+    Z levels are the inner loop: every Z level at one XY position, then the
+    next position starting again from the first level.
     """
     origin = cfg.origin()
-    xy_order = _serpentine(cfg.n_x, cfg.n_y)
     points = []
-    for iz, z_level in enumerate(cfg.z_levels_mm):
-        for ix, iy in (xy_order if iz % 2 == 0 else xy_order[::-1]):
+    for ix, iy in _serpentine(cfg.n_x, cfg.n_y):
+        for iz, z_level in enumerate(cfg.z_levels_mm):
             local = {'x': origin['x'] + ix * cfg.pitch_mm,
                      'y': origin['y'] + iy * cfg.pitch_mm,
                      'z': z_level}
@@ -343,6 +343,35 @@ def validate(cfg, points):
                     f'travel 0..{cfg.travel_max[axis]:g} mm')
 
 
+HOME = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+
+
+def scan_moves(points, return_home=True):
+    """Every stop of a scan that starts from home: [(label, point, groups)].
+
+    groups are the axis dicts to move in order (one move_to each):
+      - home -> first point: XY, then Z (safe_groups)
+      - same XY position: Z only, to the next level
+      - new XY position: Z back to the first level, then XY
+      - last point -> home: Z, then XY (safe_groups)
+    point is None for the return home.
+    """
+    stops = []
+    prev = None
+    for p in points:
+        if prev is None:
+            groups = safe_groups(HOME['z'], p.target)
+        elif (p.target['x'], p.target['y']) == (prev.target['x'], prev.target['y']):
+            groups = [{'z': p.target['z']}]
+        else:
+            groups = [{'z': p.target['z']}, {'x': p.target['x'], 'y': p.target['y']}]
+        stops.append((f'#{p.index}', p, groups))
+        prev = p
+    if return_home and prev is not None:
+        stops.append(('home', None, safe_groups(prev.target['z'], HOME)))
+    return stops
+
+
 def dry_run_lines(cfg, points, return_home=True):
     """Printable scan plan with the g1 lines a scan from home would send."""
     lines = [' #  lvl ix iy    local x/y/z (mm)          target X/Y/Z (mm)']
@@ -353,13 +382,10 @@ def dry_run_lines(cfg, points, return_home=True):
             f'{p.target["x"]:7.3f} {p.target["y"]:7.3f} {p.target["z"]:7.3f}')
 
     lines += ['', 'moves (after g28, from 0/0/0):']
-    current = {'x': 0.0, 'y': 0.0, 'z': 0.0}
-    stops = [(f'#{p.index}', p.target) for p in points]
-    if return_home:
-        stops.append(('home', {'x': 0.0, 'y': 0.0, 'z': 0.0}))
-    for label, target in stops:
+    current = dict(HOME)
+    for label, _, groups in scan_moves(points, return_home):
         steps = []
-        for group in safe_groups(current['z'], target):
+        for group in groups:
             cmds = [move_mm_command(axis, mm - current[axis], cfg.speed_mm_s,
                                     cfg.accel_mm_s2)
                     for axis, mm in group.items()

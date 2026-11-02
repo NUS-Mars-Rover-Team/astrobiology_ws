@@ -7,6 +7,7 @@ from astrobiology_actuators.microscope_scan import (
     ScanConfigError,
     dry_run_lines,
     safe_groups,
+    scan_moves,
     scan_points,
     validate,
 )
@@ -25,29 +26,22 @@ def make_cfg(**overrides):
     return ScanConfig.from_dict(d)
 
 
-def test_twenty_points_z_outer_serpentine():
+def test_twenty_points_xy_outer_z_inner():
     points = scan_points(make_cfg())
     assert len(points) == 20
     assert [p.index for p in points] == list(range(20))
-    assert [p.iz for p in points] == [iz for iz in range(5) for _ in range(4)]
-    level0 = [(p.ix, p.iy) for p in points[:4]]
-    level1 = [(p.ix, p.iy) for p in points[4:8]]
-    assert level0 == [(0, 0), (1, 0), (1, 1), (0, 1)]
-    assert level1 == level0[::-1]
+    assert [p.iz for p in points] == list(range(5)) * 4
+    xy = [(p.ix, p.iy) for p in points[::5]]
+    assert xy == [(0, 0), (1, 0), (1, 1), (0, 1)]
+    for start in range(0, 20, 5):
+        assert len({(p.ix, p.iy) for p in points[start:start + 5]}) == 1
 
 
-def test_levels_join_with_z_only_moves():
+def test_xy_hops_are_one_pitch():
     points = scan_points(make_cfg())
-    for prev, nxt in zip(points[3::4], points[4::4]):
-        assert (prev.target['x'], prev.target['y']) == (nxt.target['x'], nxt.target['y'])
-        assert prev.target['z'] != nxt.target['z']
-
-
-def test_neighbouring_points_are_one_pitch_apart():
-    points = scan_points(make_cfg())
-    for a, b in zip(points, points[1:]):
-        moved = [abs(a.target[k] - b.target[k]) for k in 'xyz']
-        assert sorted(moved)[:2] == [0.0, 0.0]
+    for a, b in zip(points[::5], points[5::5]):
+        hop = sorted(abs(a.target[k] - b.target[k]) for k in 'xy')
+        assert hop == [0.0, 1.0]
 
 
 def test_default_origin_centres_the_pattern():
@@ -58,14 +52,14 @@ def test_default_origin_centres_the_pattern():
 
 
 def test_target_is_microscope_minus_grid_offset_plus_point():
-    p = scan_points(make_cfg(scan_origin={'x': 10.0, 'y': 20.0}))[1]   # ix=1, iy=0, z=0
+    p = scan_points(make_cfg(scan_origin={'x': 10.0, 'y': 20.0}))[5]   # ix=1, iy=0, z=0
     assert p.local == {'x': 11.0, 'y': 20.0, 'z': 0.0}
     # 80 - (5 + 11), 70 - (10 + 20), 47 - (2 + 0)
     assert p.target == {'x': 64.0, 'y': 40.0, 'z': 45.0}
 
 
 def test_z_levels_lower_the_target():
-    zs = [p.target['z'] for p in scan_points(make_cfg())[::4]]
+    zs = [p.target['z'] for p in scan_points(make_cfg())[:5]]
     assert zs == [45.0, 35.0, 25.0, 15.0, 5.0]
 
 
@@ -112,11 +106,34 @@ def test_safe_groups():
     assert safe_groups(0.0, {'y': 2}) == [{'y': 2}]
 
 
+def test_scan_moves_sequence():
+    points = scan_points(make_cfg())
+    stops = scan_moves(points)
+    assert len(stops) == 21
+    first = points[0].target
+    # home -> first point: travel XY at the clear Z, then lower
+    assert stops[0][2] == [{'x': first['x'], 'y': first['y']}, {'z': first['z']}]
+    # stepping through the Z levels at one XY position: Z only
+    assert stops[1][2] == [{'z': points[1].target['z']}]
+    # next XY position: Z back to the first level, then XY
+    nxt = points[5].target
+    assert stops[5][2] == [{'z': nxt['z']}, {'x': nxt['x'], 'y': nxt['y']}]
+    assert nxt['z'] == first['z']
+    # last point -> home: Z toward 0 first, then XY
+    assert stops[-1][0] == 'home' and stops[-1][1] is None
+    assert stops[-1][2] == [{'z': 0.0}, {'x': 0.0, 'y': 0.0}]
+
+
+def test_scan_moves_no_return():
+    assert scan_moves(scan_points(make_cfg()), return_home=False)[-1][0] == '#19'
+
+
 def test_dry_run_moves():
     cfg = make_cfg()
     lines = dry_run_lines(cfg, scan_points(cfg))
     moves = lines[lines.index('moves (after g28, from 0/0/0):') + 1:]
     assert len(moves) == 21
     assert moves[0].strip() == '#0: g1 x 50.5 5 10 + g1 y 35.5 5 10  then  g1 z 45 5 10'
-    assert moves[4].strip() == '#4: g1 z -10 5 10'
+    assert moves[1].strip() == '#1: g1 z -10 5 10'
+    assert moves[5].strip() == '#5: g1 z 40 5 10  then  g1 x -1 5 10'
     assert moves[-1].strip().startswith('home: g1 z -5 5 10  then')
