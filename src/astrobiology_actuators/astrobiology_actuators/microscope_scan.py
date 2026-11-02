@@ -8,15 +8,20 @@ Subcommands:
     microscope_scan home [x y z] home onto the endstops (firmware order Z, Y, X)
     microscope_scan goto --x 1   absolute move in mm (axes not given stay put);
                                  Z moves alone: first toward 0, last away from 0
+    microscope_scan scan             home, visit every point, log pos to a CSV
     microscope_scan scan --dry-run   print the scan points and moves (no port)
 
 Scan geometry (config/microscope_scan.yaml): the gantry moves the cache tray
-under a fixed microscope, so tray point p is under the lens when the gantry is at
-    target = microscope_offset - (grid_offset + p)
+under a fixed microscope, so grid point p is under the lens when the gantry is at
+    X, Y = microscope_offset - (grid_offset + p)
+    Z    = z_offset + z level
+Z is back at 0 (clear) whenever X/Y moves.
 """
 
 import argparse
+import csv
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 import sys
 import time
@@ -231,10 +236,12 @@ def _xyz(d, name, axes='xyz'):
 class ScanConfig:
     """Scan geometry and motion settings.  Lengths in mm, gantry frame."""
 
-    grid_offset: dict           # {x, y, z}: grid origin corner on the tray
-    microscope_offset: dict     # {x, y, z}: lens focal point
+    grid_offset: dict           # {x, y}: grid origin corner on the tray
+    microscope_offset: dict     # {x, y}: lens axis
     grid_size: dict             # {x, y}
     travel_max: dict            # {x, y, z}: furthest safe gantry position
+    travel_min: dict = None     # {x, y, z}: nearest safe gantry position; None = 0
+    z_offset_mm: float = 0.0    # gantry Z of the first Z level
     scan_origin: dict = None    # {x, y} first pattern point in the grid; None = centred
     pitch_mm: float = 1.0
     n_x: int = 2
@@ -246,14 +253,21 @@ class ScanConfig:
     pos_tolerance_mm: float = 0.001
     calibrated: bool = False    # set true once the offsets are measured
 
+    def __post_init__(self):
+        if self.travel_min is None:
+            self.travel_min = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+
     @classmethod
     def from_dict(cls, d):
         try:
             return cls(
-                grid_offset=_xyz(d['grid_offset'], 'grid_offset'),
-                microscope_offset=_xyz(d['microscope_offset'], 'microscope_offset'),
+                grid_offset=_xyz(d['grid_offset'], 'grid_offset', 'xy'),
+                microscope_offset=_xyz(d['microscope_offset'], 'microscope_offset', 'xy'),
                 grid_size=_xyz(d['grid_size'], 'grid_size', 'xy'),
                 travel_max=_xyz(d['travel_max'], 'travel_max'),
+                travel_min=(None if d.get('travel_min') is None
+                            else _xyz(d['travel_min'], 'travel_min')),
+                z_offset_mm=float(d.get('z_offset_mm', 0.0)),
                 scan_origin=(None if d.get('scan_origin') is None
                              else _xyz(d['scan_origin'], 'scan_origin', 'xy')),
                 pitch_mm=float(d.get('pitch_mm', 1.0)),
@@ -291,8 +305,8 @@ class ScanPoint:
     iz: int
     ix: int
     iy: int
-    local: dict     # {x, y, z} in grid coordinates (z = z level)
-    target: dict    # {x, y, z} gantry position that puts local under the lens
+    local: dict     # {x, y} in grid coordinates, z = the Z level
+    target: dict    # {x, y, z} gantry position
 
 
 def _serpentine(n_x, n_y):
@@ -315,7 +329,8 @@ def scan_points(cfg):
                      'y': origin['y'] + iy * cfg.pitch_mm,
                      'z': z_level}
             target = {axis: cfg.microscope_offset[axis]
-                      - (cfg.grid_offset[axis] + local[axis]) for axis in 'xyz'}
+                      - (cfg.grid_offset[axis] + local[axis]) for axis in 'xy'}
+            target['z'] = cfg.z_offset_mm + z_level
             points.append(ScanPoint(len(points), iz, ix, iy, local, target))
     return points
 
@@ -337,38 +352,38 @@ def validate(cfg, points):
                     f'point {p.index} {axis}={p.local[axis]:.3f} is outside the '
                     f'{cfg.grid_size[axis]:g} mm grid')
         for axis in 'xyz':
-            if not 0 <= p.target[axis] <= cfg.travel_max[axis]:
+            lo, hi = max(cfg.travel_min[axis], 0.0), cfg.travel_max[axis]
+            if not lo <= p.target[axis] <= hi:
                 raise ScanConfigError(
                     f'point {p.index} target {axis}={p.target[axis]:.3f} is outside '
-                    f'travel 0..{cfg.travel_max[axis]:g} mm')
+                    f'travel {lo:g}..{hi:g} mm')
 
 
 HOME = {'x': 0.0, 'y': 0.0, 'z': 0.0}
 
 
 def scan_moves(points, return_home=True):
-    """Every stop of a scan that starts from home: [(label, point, groups)].
+    """Every stop of a scan: [(label, point, groups)].
 
-    groups are the axis dicts to move in order (one move_to each):
-      - home -> first point: XY, then Z (safe_groups)
+    groups are the axis dicts to move in order (one move_to each).  Z is at 0
+    (clear) whenever XY moves:
+      - new XY position (incl. the first): Z to 0, XY, then Z to the level
       - same XY position: Z only, to the next level
-      - new XY position: Z back to the first level, then XY
-      - last point -> home: Z, then XY (safe_groups)
+      - last point -> home: Z to 0, then XY to 0
     point is None for the return home.
     """
     stops = []
     prev = None
     for p in points:
-        if prev is None:
-            groups = safe_groups(HOME['z'], p.target)
-        elif (p.target['x'], p.target['y']) == (prev.target['x'], prev.target['y']):
+        xy = {'x': p.target['x'], 'y': p.target['y']}
+        if prev is not None and (prev.target['x'], prev.target['y']) == (xy['x'], xy['y']):
             groups = [{'z': p.target['z']}]
         else:
-            groups = [{'z': p.target['z']}, {'x': p.target['x'], 'y': p.target['y']}]
+            groups = [{'z': 0.0}, xy, {'z': p.target['z']}]
         stops.append((f'#{p.index}', p, groups))
         prev = p
     if return_home and prev is not None:
-        stops.append(('home', None, safe_groups(prev.target['z'], HOME)))
+        stops.append(('home', None, [{'z': 0.0}, {'x': 0.0, 'y': 0.0}]))
     return stops
 
 
@@ -395,6 +410,48 @@ def dry_run_lines(cfg, points, return_home=True):
             current.update(group)
         lines.append(f'  {label:>4}: ' + ('  then  '.join(steps) or '(no move)'))
     return lines
+
+
+CSV_FIELDS = (
+    'index', 'iz', 'ix', 'iy', 'local_x', 'local_y', 'local_z',
+    'target_x', 'target_y', 'target_z', 'pos_x', 'pos_y', 'pos_z',
+    'error_mm', 'timestamp',
+)
+
+
+def run_scan(gantry, cfg, points, csv_file, home=True, return_home=True, log=print):
+    """Move through every point, read pos after settling and log a CSV row.
+
+    csv_file is an open text file; rows are flushed as they are written so a
+    Ctrl-C keeps everything recorded so far.
+    """
+    writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
+    writer.writeheader()
+    if home:
+        log('homing...')
+        gantry.home()
+    for label, p, groups in scan_moves(points, return_home):
+        for group in groups:
+            gantry.move_to(group, cfg.speed_mm_s, cfg.accel_mm_s2)
+        if p is None:
+            log('back at 0/0/0')
+            continue
+        time.sleep(cfg.settle_s)
+        pos = gantry.pos()
+        error = max(abs(pos[axis] - p.target[axis]) for axis in 'xyz')
+        writer.writerow({
+            'index': p.index, 'iz': p.iz, 'ix': p.ix, 'iy': p.iy,
+            **{f'local_{k}': f'{v:.4f}' for k, v in p.local.items()},
+            **{f'target_{k}': f'{v:.4f}' for k, v in p.target.items()},
+            **{f'pos_{k}': f'{v:.4f}' for k, v in pos.items()},
+            'error_mm': f'{error:.4f}',
+            'timestamp': datetime.now().isoformat(timespec='milliseconds'),
+        })
+        csv_file.flush()
+        log(f'{label:>4}/{len(points)}  ({p.ix},{p.iy}) lvl {p.iz}  '
+            f'X {pos["x"]:.4f}  Y {pos["y"]:.4f}  Z {pos["z"]:.4f}'
+            + (f'  WARNING off target by {error:.4f} mm'
+               if error > cfg.pos_tolerance_mm else ''))
 
 
 def default_config_path():
@@ -426,16 +483,27 @@ def _cmd_goto(gantry, args):
     _cmd_pos(gantry, args)
 
 
-def _cmd_scan_dry_run(args):
+def _load_scan(args):
     cfg = ScanConfig.from_yaml(args.config)
+    if args.z_levels:
+        cfg.z_levels_mm = tuple(args.z_levels)
     points = scan_points(cfg)
     validate(cfg, points)
     print(f'config: {args.config}')
-    if not cfg.calibrated:
-        print('WARNING: calibrated: false -- offsets are placeholders')
-    print(f'{len(points)} points, speed {cfg.speed_mm_s:g} mm/s, '
-          f'accel {cfg.accel_mm_s2:g} mm/s^2\n')
-    print('\n'.join(dry_run_lines(cfg, points, return_home=not args.no_return)))
+    print(f'{len(points)} points, Z levels {", ".join(f"{z:g}" for z in cfg.z_levels_mm)} mm '
+          f'(+ z_offset {cfg.z_offset_mm:g}), speed {cfg.speed_mm_s:g} mm/s, '
+          f'accel {cfg.accel_mm_s2:g} mm/s^2')
+    return cfg, points
+
+
+def _cmd_scan(gantry, args):
+    out = args.out or Path('scans') / f'microscope_scan_{datetime.now():%Y%m%d_%H%M%S}.csv'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    print(f'logging to {out}')
+    with open(out, 'w', newline='') as f:
+        run_scan(gantry, args.cfg, args.points, f,
+                 home=not args.skip_home, return_home=not args.no_return)
+    print(f'done: {len(args.points)} points logged to {out}')
 
 
 def _axis(name):
@@ -472,6 +540,13 @@ def build_parser():
                    help='print points and moves without opening the port')
     p.add_argument('--no-return', action='store_true',
                    help='stay at the last point instead of going back to 0/0/0')
+    p.add_argument('--skip-home', action='store_true',
+                   help="don't run g28 first (trust the current position)")
+    p.add_argument('--z-levels', type=float, nargs='+', metavar='MM',
+                   help='override z_levels_mm from the config, e.g. --z-levels 0 1 2')
+    p.add_argument('--out', type=Path, default=None,
+                   help='CSV path (default: scans/microscope_scan_<time>.csv)')
+    p.set_defaults(func=_cmd_scan)
     return parser
 
 
@@ -481,21 +556,26 @@ def main(argv=None):
     if args.command == 'goto' and (args.x, args.y, args.z) == (None, None, None):
         parser.error('goto needs at least one of --x, --y, --z')
     if args.command == 'scan':
-        if not args.dry_run:
-            parser.error('only scan --dry-run is implemented so far')
         args.config = args.config or default_config_path()
         try:
-            _cmd_scan_dry_run(args)
+            args.cfg, args.points = _load_scan(args)
         except (OSError, yaml.YAMLError, ScanConfigError) as e:
             print(f'error: {e}', file=sys.stderr)
             return 1
-        return 0
+        if args.dry_run:
+            print()
+            print('\n'.join(dry_run_lines(args.cfg, args.points,
+                                           return_home=not args.no_return)))
+            return 0
+        if not args.cfg.calibrated:
+            print(f'error: calibrated is false in {args.config}; check the offsets '
+                  'with --dry-run, then set it to true', file=sys.stderr)
+            return 1
 
-    import serial
     try:
         with Gantry(args.port, args.baud, verbose=args.verbose) as gantry:
             args.func(gantry, args)
-    except (GantryError, serial.SerialException) as e:
+    except (GantryError, OSError) as e:     # serial.SerialException is an OSError
         print(f'error: {e}', file=sys.stderr)
         return 1
     except KeyboardInterrupt:

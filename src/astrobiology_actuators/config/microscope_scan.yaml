@@ -1,20 +1,29 @@
 # Microscope grid scan (microscope_scan scan).  Plain YAML, not ROS params.
 #
 # All lengths are mm in the gantry frame: home = the endstops = 0/0/0, and
-# positive moves away from them.  The gantry moves the cache tray under a fixed
-# microscope, so tray point p (grid coordinates) is under the lens at
-#     target = microscope_offset - (grid_offset + p)
-# Only microscope_offset - grid_offset matters: focus on the grid's origin
-# corner with 'microscope_scan goto', and 'microscope_scan pos' reads it.
+# positive moves away from them.  Z = 0 is clear (tray furthest from the
+# microscope); +Z moves the tray toward it.
+#
+# The gantry moves the cache tray under a fixed microscope, so grid point p is
+# under the lens when the gantry is at
+#     X, Y = microscope_offset - (grid_offset + p)
+#     Z    = z_offset_mm + z level
+# Z goes back to 0 before every X/Y move.
 
-# Placeholders until measured on the machine.  The live scan refuses to run
-# while calibrated is false; --dry-run works either way.
-calibrated: false
-grid_offset:       {x: 0.0,  y: 0.0,  z: 0.0}   # grid origin corner on the tray
-microscope_offset: {x: 60.0, y: 60.0, z: 45.0}  # lens focal point
-travel_max:        {x: 100.0, y: 100.0, z: 50.0}  # furthest safe gantry position
+# The live scan refuses to run while this is false; --dry-run works either way.
+calibrated: true
 
-grid_size: {x: 50.0, y: 50.0}
+# Cache is 40 x 40 mm.  These offsets put the 2 x 2 pattern's centre at gantry
+# X/Y = 20, 20 (the cache centre in the sketch) -- re-measure once the
+# microscope position is known.
+grid_size:         {x: 40.0, y: 40.0}
+grid_offset:       {x: 0.0,  y: 0.0}
+microscope_offset: {x: 40.0, y: 40.0}
+
+# Safe gantry travel (the 75 x 75 box).  Z max is deliberately small until the
+# Z travel is measured: raise it before using the 0-40 mm levels below.
+travel_min: {x: 11.275, y: 2.55,  z: 0.0}
+travel_max: {x: 86.275, y: 77.55, z: 5.0}
 
 # 2 x 2 pattern at 1 mm pitch.  scan_origin is the first point in grid
 # coordinates, e.g. {x: 10.0, y: 10.0}; null centres the pattern in the grid.
@@ -23,9 +32,10 @@ pitch_mm: 1.0
 n_x: 2
 n_y: 2
 
-# Z levels relative to the grid's z.  Each level lowers the target Z (toward
-# the endstop); negate them if the levels should go the other way.
-z_levels_mm: [0.0, 10.0, 20.0, 30.0, 40.0]
+# Z levels, visited in order at every X/Y position.  Trial: 0-4 mm.
+# Target: [0.0, 10.0, 20.0, 30.0, 40.0] (0-4 cm) once travel_max.z allows it.
+z_offset_mm: 0.0
+z_levels_mm: [0.0, 1.0, 2.0, 3.0, 4.0]
 
 speed_mm_s: 5.0         # firmware max 31.25
 accel_mm_s2: 10.0       # firmware max 312.5

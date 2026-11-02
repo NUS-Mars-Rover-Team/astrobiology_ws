@@ -11,3 +11,6 @@ __pycache__/
 
 # Editor
 .vscode/
+
+# microscope_scan output
+scans/
