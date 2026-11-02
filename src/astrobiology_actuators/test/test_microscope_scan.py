@@ -20,9 +20,6 @@ class FakeSerial:
     def readline(self):
         return (self._rx.pop(0) + '\r\n').encode() if self._rx else b''
 
-    def reset_input_buffer(self):
-        pass
-
     def close(self):
         self.closed = True
 
@@ -37,6 +34,14 @@ def test_pos_returns_xyz():
         'pos': ['pos Z:40.0000 Y:24.5000 X:25.5000 C:0.0000 P:0 F:0']})
     assert g.pos() == {'x': 25.5, 'y': 24.5, 'z': 40.0}
     assert ser.written[-1] == b'pos\n'
+
+
+def test_startup_drains_reply_to_flush_newline():
+    # Junk from opening the port makes the ESP32 reject the flush newline
+    g, _ = make_gantry({
+        '': ['error line too long or invalid; discarded'],
+        'pos': ['pos Z:0.0000 Y:0.0000 X:2.0000']})
+    assert g.pos()['x'] == 2.0
 
 
 def test_pos_skips_unrelated_lines():

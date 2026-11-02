@@ -20,6 +20,7 @@ from astrobiology_actuators.serial_commands import (
 DEFAULT_PORT = '/dev/esp_steppers'
 DEFAULT_BAUD = 115200
 BOOT_WAIT_S = 2.0       # opening the port resets the ESP32; wait out its banner
+FLUSH_DRAIN_S = 0.2
 POS_TIMEOUT_S = 2.0
 
 # Reply prefixes (lower-cased) that mean the firmware rejected or aborted something
@@ -33,7 +34,7 @@ class GantryError(RuntimeError):
 class Gantry:
     """Line-based serial link to the stepper ESP32, gantry axes only.
 
-    Pass ``ser`` (anything with write/readline/reset_input_buffer/close)
+    Pass ``ser`` (anything with write/readline/close)
     to skip opening a real port, e.g. in tests.
     """
 
@@ -47,8 +48,11 @@ class Gantry:
             import serial
             self._ser = serial.Serial(port, baud, timeout=0.1)
             self._drain(BOOT_WAIT_S)
-        self._ser.reset_input_buffer()
-        self._ser.write(b'\n')      # flush any half-typed line on the ESP32
+        # End any half-received line on the ESP32.  Opening the port can inject
+        # a junk byte, so the reply to this is often 'error line too long or
+        # invalid; discarded' -- drain it rather than mistake it for a fault.
+        self._ser.write(b'\n')
+        self._drain(FLUSH_DRAIN_S)
 
     def _drain(self, duration):
         """Discard boot banner/leftover lines for duration s (shown with --verbose)."""
