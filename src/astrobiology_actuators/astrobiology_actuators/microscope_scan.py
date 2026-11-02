@@ -144,7 +144,15 @@ def _cmd_home(gantry, args):
     _cmd_pos(gantry, args)
 
 
-def main(argv=None):
+def _axis(name):
+    # A type check, not choices=: Python 3.10 argparse rejects an empty
+    # nargs='*' list against choices, so a bare 'home' would fail to parse.
+    if name not in ('x', 'y', 'z'):
+        raise argparse.ArgumentTypeError(f"invalid axis '{name}' (choose x, y, z)")
+    return name
+
+
+def build_parser():
     parser = argparse.ArgumentParser(
         prog='microscope_scan',
         description='Gantry jog tools and microscope grid scan (stop pump_node first).')
@@ -155,9 +163,13 @@ def main(argv=None):
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('pos', help='print the X/Y/Z position').set_defaults(func=_cmd_pos)
     p = sub.add_parser('home', help='home onto the endstops (default: all axes)')
-    p.add_argument('axes', nargs='*', choices=['x', 'y', 'z'])
+    p.add_argument('axes', nargs='*', type=_axis, metavar='{x,y,z}')
     p.set_defaults(func=_cmd_home)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     import serial
     try:

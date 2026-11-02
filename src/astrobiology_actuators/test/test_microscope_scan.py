@@ -1,6 +1,6 @@
 import pytest
 
-from astrobiology_actuators.microscope_scan import Gantry, GantryError
+from astrobiology_actuators.microscope_scan import Gantry, GantryError, build_parser
 
 
 class FakeSerial:
@@ -105,3 +105,16 @@ def test_home_failure_raises_and_estops_on_close():
         g.home()
     g.close()
     assert ser.written[-1] == b'!'
+
+
+def test_cli_home_without_axes_parses():
+    assert build_parser().parse_args(['home']).axes == []
+
+
+def test_cli_home_axes():
+    assert build_parser().parse_args(['home', 'z', 'x']).axes == ['z', 'x']
+
+
+def test_cli_home_rejects_bad_axis():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(['home', 'c'])
