@@ -5,6 +5,7 @@ must NOT be running (it holds the same port).
 
 Subcommands:
     microscope_scan pos          print the gantry X/Y/Z position in mm
+    microscope_scan home [x y z] home onto the endstops (firmware order Z, Y, X)
 """
 
 import argparse
@@ -13,6 +14,7 @@ import time
 
 from astrobiology_actuators.serial_commands import (
     ESTOP_CHAR,
+    home_command,
     parse_pos,
     pos_command,
 )
@@ -22,6 +24,8 @@ DEFAULT_BAUD = 115200
 BOOT_WAIT_S = 2.0       # opening the port resets the ESP32; wait out its banner
 FLUSH_DRAIN_S = 0.2
 POS_TIMEOUT_S = 2.0
+# Firmware worst case per axis: 1,000,000-step search at 10 kHz = 100 s, plus backoffs
+HOME_TIMEOUT_PER_AXIS_S = 120.0
 
 # Reply prefixes (lower-cased) that mean the firmware rejected or aborted something
 _FAULT_PREFIXES = ('error', 'aborted', 'estop')
@@ -104,6 +108,18 @@ class Gantry:
         except KeyError as e:
             raise GantryError(f'pos reply has no {e} axis') from None
 
+    def home(self, axes=()):
+        """Home the given axes (default all) and wait for 'done g28'.
+
+        The firmware homes one axis at a time in Z, Y, X order and sets each
+        homed axis to 0.  Raises GantryError on 'error homing failed ...'.
+        """
+        self.send(home_command(*axes))
+        self._moving = True
+        self.readline_until(lambda line: True if line == 'done g28' else None,
+                            HOME_TIMEOUT_PER_AXIS_S * (len(axes) or 3))
+        self._moving = False
+
     def estop(self):
         """Instant stop of every motor.  Drivers are disabled: re-home after."""
         self._ser.write(ESTOP_CHAR)
@@ -123,6 +139,11 @@ def _cmd_pos(gantry, args):
     print(f"X {p['x']:.4f}  Y {p['y']:.4f}  Z {p['z']:.4f}  (mm)")
 
 
+def _cmd_home(gantry, args):
+    gantry.home(tuple(args.axes))
+    _cmd_pos(gantry, args)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog='microscope_scan',
@@ -133,6 +154,9 @@ def main(argv=None):
                         help='print every line sent to / read from the ESP32')
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('pos', help='print the X/Y/Z position').set_defaults(func=_cmd_pos)
+    p = sub.add_parser('home', help='home onto the endstops (default: all axes)')
+    p.add_argument('axes', nargs='*', choices=['x', 'y', 'z'])
+    p.set_defaults(func=_cmd_home)
     args = parser.parse_args(argv)
 
     import serial

@@ -71,3 +71,37 @@ def test_close_sends_estop_only_while_moving():
     g._moving = True
     g.close()
     assert ser.written[-1] == b'!'
+
+
+HOME_ALL_REPLY = [
+    'ok g28 accepted: z y x',
+    'homing z', 'homed z steps=0',
+    'homing y', 'homed y steps=0',
+    'homing x', 'homed x steps=0',
+    'done g28',
+]
+
+
+def test_home_waits_for_done_g28():
+    g, ser = make_gantry({'g28': HOME_ALL_REPLY})
+    g.home()
+    assert ser.written[-1] == b'g28\n'
+    g.close()
+    assert b'!' not in ser.written
+
+
+def test_home_selected_axes():
+    g, ser = make_gantry({'g28 x': ['ok g28 accepted: x', 'homing x',
+                                    'homed x steps=0', 'done g28']})
+    g.home(('x',))
+    assert ser.written[-1] == b'g28 x\n'
+
+
+def test_home_failure_raises_and_estops_on_close():
+    g, ser = make_gantry({'g28': [
+        'ok g28 accepted: z y x', 'homing z',
+        'error homing failed z: endstop not found within max travel']})
+    with pytest.raises(GantryError, match='endstop not found'):
+        g.home()
+    g.close()
+    assert ser.written[-1] == b'!'

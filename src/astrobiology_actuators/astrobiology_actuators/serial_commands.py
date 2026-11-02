@@ -5,6 +5,7 @@ The ESP32 accepts line-based commands:
     stop <motor|all>   estop [motor|all]
     enable <motor|all> on|off   status [motor|all]   zero <motor|all>
     pos   ->   pos Z:<mm> Y:<mm> X:<mm> C:<rev> P:<pulses> F:<pulses>
+    g28 [x] [y] [z]   home onto endstops (always Z, Y, X order); ends with 'done g28'
     !     (single byte, no newline) instant emergency stop of everything
 
 Motor IDs: pump (p), centrifuge (c), flush (f), x, y, z.
@@ -36,6 +37,11 @@ def estop_command():
 def pos_command():
     """Ask for every motor's coordinate (reply parsed by parse_pos)."""
     return 'pos'
+
+
+def home_command(*axes):
+    """Home the listed gantry axes (none = every axis with an endstop)."""
+    return ' '.join(('g28',) + axes)
 
 
 def parse_pos(line):

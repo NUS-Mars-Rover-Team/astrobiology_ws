@@ -1,5 +1,6 @@
 from astrobiology_actuators.serial_commands import (
     estop_command,
+    home_command,
     move_command,
     parse_pos,
     pos_command,
@@ -45,3 +46,8 @@ def test_parse_pos_rejects_other_lines():
     assert parse_pos('done x steps=3200 pos=1.0000') is None
     assert parse_pos('ok x accepted') is None
     assert parse_pos('pos') is None
+
+
+def test_home_command():
+    assert home_command() == 'g28'
+    assert home_command('x', 'y') == 'g28 x y'
