@@ -114,7 +114,11 @@ Runs on any machine on the same network as the Pi (same `ROS_DOMAIN_ID=67` and
 ```bash
 ros2 run spectro_cam spectrum_plot            # x-axis in nm
 ros2 run spectro_cam spectrum_plot --pixels   # x-axis in ROI columns, for calibration
+ros2 run spectro_cam spectrum_plot --autoscale  # autoscale y, for absorbance (zero reference set)
 ```
+
+The y-axis is fixed at 0–0.35 by default (saturation is 0.333), so the level and any clipping
+can be read directly; change it with `--ylim MIN MAX`.
 
 ## Usage
 
