@@ -208,3 +208,33 @@ def test_cli_goto_requires_an_axis(capsys):
 def test_cli_goto_parses_axes():
     args = build_parser().parse_args(['goto', '--x', '1', '--z', '2.5', '--speed', '2'])
     assert (args.x, args.y, args.z, args.speed, args.accel) == (1.0, None, 2.5, 2.0, 10.0)
+
+
+def test_move_safe_lowers_z_last():
+    # Z heading away from 0 (the clear position): travel XY first, then Z
+    g, ser = make_gantry({
+        'pos': POS_ORIGIN,
+        'g1 x 10 5 10': ['done x steps=32000 pos=10.0000'],
+        'g1 y 10 5 10': ['done y steps=32000 pos=10.0000'],
+        'g1 z 10 5 10': ['done z steps=32000 pos=10.0000']})
+    g.move_safe({'x': 10.0, 'y': 10.0, 'z': 10.0})
+    assert g1_lines(ser) == ['g1 x 10 5 10', 'g1 y 10 5 10', 'g1 z 10 5 10']
+
+
+def test_move_safe_lifts_z_first():
+    # Z heading toward 0: lift clear first, then travel XY
+    g, ser = make_gantry({
+        'pos': ['pos Z:10.0000 Y:10.0000 X:10.0000'],
+        'g1 z -10 5 10': ['done z steps=0 pos=0.0000'],
+        'g1 x -10 5 10': ['done x steps=0 pos=0.0000'],
+        'g1 y -10 5 10': ['done y steps=0 pos=0.0000']})
+    g.move_safe({'x': 0.0, 'y': 0.0, 'z': 0.0})
+    assert g1_lines(ser) == ['g1 z -10 5 10', 'g1 x -10 5 10', 'g1 y -10 5 10']
+
+
+def test_move_safe_xy_only():
+    g, ser = make_gantry({
+        'pos': POS_ORIGIN,
+        'g1 y 1 5 10': ['done y steps=3200 pos=1.0000']})
+    g.move_safe({'y': 1.0})
+    assert g1_lines(ser) == ['g1 y 1 5 10']

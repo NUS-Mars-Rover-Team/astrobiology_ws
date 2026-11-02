@@ -6,7 +6,8 @@ must NOT be running (it holds the same port).
 Subcommands:
     microscope_scan pos          print the gantry X/Y/Z position in mm
     microscope_scan home [x y z] home onto the endstops (firmware order Z, Y, X)
-    microscope_scan goto --x 1   absolute move in mm (axes not given stay put)
+    microscope_scan goto --x 1   absolute move in mm (axes not given stay put);
+                                 Z moves alone: first toward 0, last away from 0
 """
 
 import argparse
@@ -171,6 +172,24 @@ class Gantry:
         self.readline_until(all_done, timeout)
         self._moving = False
 
+    def move_safe(self, target, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2):
+        """move_to, but Z and XY never move at the same time.
+
+        Z = 0 is the clear position (the firmware homes Z first to lift
+        clear), so Z moves first when it is heading toward 0 and last when
+        heading away: the tray lifts clear before travelling and travels
+        before lowering.
+        """
+        xy = {axis: target[axis] for axis in 'xy' if axis in target}
+        z = {'z': target['z']} if 'z' in target else {}
+        if z and z['z'] < self.pos()['z']:
+            groups = (z, xy)
+        else:
+            groups = (xy, z)
+        for group in groups:
+            if group:
+                self.move_to(group, speed, accel)
+
     def estop(self):
         """Instant stop of every motor.  Drivers are disabled: re-home after."""
         self._ser.write(ESTOP_CHAR)
@@ -198,7 +217,7 @@ def _cmd_home(gantry, args):
 def _cmd_goto(gantry, args):
     target = {axis: getattr(args, axis) for axis in 'xyz'
               if getattr(args, axis) is not None}
-    gantry.move_to(target, args.speed, args.accel)
+    gantry.move_safe(target, args.speed, args.accel)
     _cmd_pos(gantry, args)
 
 
