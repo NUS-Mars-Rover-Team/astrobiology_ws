@@ -42,13 +42,21 @@ class Gantry:
         self._log = log
         self._verbose = verbose
         self._moving = False
+        self._ser = ser
         if ser is None:
             import serial
-            ser = serial.Serial(port, baud, timeout=0.1)
-            time.sleep(BOOT_WAIT_S)
-        self._ser = ser
+            self._ser = serial.Serial(port, baud, timeout=0.1)
+            self._drain(BOOT_WAIT_S)
         self._ser.reset_input_buffer()
         self._ser.write(b'\n')      # flush any half-typed line on the ESP32
+
+    def _drain(self, duration):
+        """Discard boot banner/leftover lines for duration s (shown with --verbose)."""
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline:
+            line = self._ser.readline().decode(errors='replace').strip()
+            if line and self._verbose:
+                self._log(f'< (boot) {line}')
 
     def __enter__(self):
         return self
