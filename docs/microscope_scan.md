@@ -17,6 +17,8 @@ Config: [`src/astrobiology_actuators/config/microscope_scan.yaml`](../src/astrob
 | `pos`, `home`, `goto` jog commands | Done, tested on the Pi |
 | 20-point scan with CSV log | Done, tested on the Pi (trial Z levels 0–4 mm) |
 | Picture at every point | Done, tested on the Pi |
+| Camera udev link `/dev/uv_microscope_cam` | Done on the Pi; see [Camera](#camera) |
+| CSI camera delivering frames | **Open:** after renumbering, `ffmpeg` and `vcgencmd` hang; see [Camera](#camera) |
 | Unit tests (no hardware) | Done, 105 passing in `astrobiology_actuators/test/` |
 | Z travel limit | **Open:** capped at 5 mm in the config until measured |
 | Real Z levels 0–40 mm (0–4 cm) | **Open:** needs the Z travel limit first |
@@ -116,7 +118,7 @@ timestamp`.
   out, not where the tray physically is. The steppers are open loop.
 
 **Pictures:** each picture is saved with
-`ffmpeg -f v4l2 -i /dev/video2 -frames:v 1 testN.jpg`, after first dropping `skip_frames`
+`ffmpeg -f v4l2 -i /dev/uv_microscope_cam -frames:v 1 testN.jpg`, after first dropping `skip_frames`
 frames so auto-exposure has settled. They go to `~/Pictures/test1.jpg` … `test20.jpg` and are
 **overwritten every run**, so copy them off before the next scan.
 - The old file is deleted before each capture, so a failed capture can't leave last run's picture
@@ -144,7 +146,7 @@ frames so auto-exposure has settled. They go to `~/Pictures/test1.jpg` … `test
 | `speed_mm_s`, `accel_mm_s2` | 5, 10 | Motion for every move (firmware max 31.25 mm/s, 312.5 mm/s²) |
 | `settle_s` | 0.5 | Wait after each move before reading `pos` and taking the picture |
 | `pos_tolerance_mm` | 0.001 | Warn if `pos` is further than this from the target (1 step = 0.0003 mm) |
-| `camera.enabled`, `camera.device` | `true`, `/dev/video2` | Pi camera |
+| `camera.enabled`, `camera.device` | `true`, `/dev/uv_microscope_cam` | Pi CSI camera (udev link; see [Camera](#camera)) |
 | `camera.image_dir`, `camera.image_prefix` | `~/Pictures`, `test` | Picture names: `<image_dir>/<image_prefix>N.jpg` |
 | `camera.skip_frames` | 5 | Frames dropped before the saved one (0 = exactly the plain ffmpeg command) |
 
@@ -199,6 +201,48 @@ ls -l /dev/esp_steppers /dev/raman_spectroscope   # should point to different tt
 
 After that, `--port` can be dropped.
 
+## Camera
+
+The microscope camera is the Pi's CSI camera, driven by the MMAL `bcm2835-v4l2` driver. `v4l2-ctl
+--list-devices` shows it as `mmal service 16.1 (platform:bcm2835-v4l2-0)`. Its `/dev/videoN`
+number changes depending on which USB cameras are plugged in: it was `video2` with them, and
+`video0` without. A udev rule gives it a fixed name. It matches on the attributes
+`udevadm info -a -n /dev/videoN` reports (`ATTR{name}=="camera0"`, `ATTR{index}=="0"`).
+
+`/etc/udev/rules.d/99-mrt-camera.rules`:
+
+```
+SUBSYSTEM=="video4linux", ATTR{name}=="camera0", ATTR{index}=="0", SYMLINK+="uv_microscope_cam", MODE="0660", GROUP="video"
+```
+
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/uv_microscope_cam
+```
+
+Check that it captures. The time limit stops a dead camera from hanging the terminal:
+
+```bash
+timeout 15 ffmpeg -loglevel error -y -f v4l2 -i /dev/uv_microscope_cam -frames:v 1 ~/test.jpg; echo "exit=$?"
+```
+
+`exit=0` means it works. `exit=124` means it timed out: the device opened but sent no frames.
+
+**If `ffmpeg` hangs:** a capture that never gets a frame can leave the GPU firmware channel stuck.
+After that, `vcgencmd` hangs too, and so does every later capture. Only a reboot clears it
+(`kill -9` doesn't remove processes stuck in `D` state). After rebooting, run these before
+touching the camera:
+
+```bash
+timeout 5 vcgencmd get_throttled   # want throttled=0x0 (no under-voltage)
+timeout 5 vcgencmd get_camera      # want supported=1 detected=1
+```
+
+`detected=0` means the Pi doesn't see the camera: power off and reseat the ribbon cable at both
+ends. A non-zero `throttled` value points at the power supply; the cameras and USB devices are
+the first to misbehave when the 5 V rail sags. Until the camera works, run the scan with
+`--no-images`.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
@@ -207,7 +251,8 @@ After that, `--port` can be dropped.
 | `error line too long or invalid; discarded` when typing in picocom | The firmware rejects any line containing control bytes. picocom sends Backspace and arrow keys as raw bytes, so retype the whole line without corrections |
 | `< (boot) error line too long …` with `-v` | Harmless: a junk byte when the port opens. The script clears it before the first command |
 | `error homing failed <axis>: endstop not found …` | Check the endstop in picocom with `status x` (released → `open`, pressed → `TRIGGERED`). X/Y are on GPIO35/34, which have no internal pull resistor; with the HIGH trigger level they need an external pull-down |
-| `camera /dev/video2 not found` | The camera renumbered after a reboot or replug. `ls /dev/video*`, then `--camera /dev/videoN` |
+| `camera /dev/uv_microscope_cam not found` | The udev rule is missing or didn't match; see [Camera](#camera). Meanwhile find the CSI camera with `v4l2-ctl --list-devices` (`mmal service 16.1`) and pass `--camera /dev/videoN` |
+| `ffmpeg` sits after its banner, or `vcgencmd` hangs | The camera isn't delivering frames and the GPU firmware channel is stuck; see [Camera](#camera) |
 | `WARNING image failed: … Device or resource busy` | Another program has the camera open; close it |
 | `target z=… is outside travel` | A Z level is beyond `travel_max.z`; see [Moving to the real 0–4 cm Z levels](#moving-to-the-real-04-cm-z-levels) |
 | `calibrated is false` | Check the offsets with `--dry-run`, then set `calibrated: true` |

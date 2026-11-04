@@ -15,7 +15,7 @@ Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into
 | ESP32 6-channel stepper controller (CH340) | Serial 115200 (custom G1, see below) | `/dev/esp_steppers` (see [udev rules](#udev-rules)) |
 | ESP32 science lights controller | Serial 115200 (NAME 0\|1) | `/dev/esp_lights` |
 | Sonix spectroscope camera | V4L2 (1920x1080 MJPG) | `/dev/spectroscope` |
-| Microscope camera (Pi CSI) | V4L2 | `/dev/video2` (can renumber) |
+| Microscope camera (Pi CSI, MMAL `bcm2835-v4l2`) | V4L2 | `/dev/uv_microscope_cam` |
 
 ### ESP32 Motor Channels
 
@@ -82,6 +82,10 @@ SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1
 
 # ESP32 science lights controller — update idVendor/idProduct or use ATTRS{serial} to distinguish from esp_steppers
 SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="esp_lights", MODE="0666"
+
+# Pi CSI microscope camera (MMAL / bcm2835-v4l2), capture node only. /dev/videoN renumbers
+# when USB cameras are plugged in, so microscope_scan uses this link.
+SUBSYSTEM=="video4linux", ATTR{name}=="camera0", ATTR{index}=="0", SYMLINK+="uv_microscope_cam", MODE="0660", GROUP="video"
 
 # Sonix spectroscope camera
 SUBSYSTEM=="video4linux", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="spectroscope", MODE="0666"

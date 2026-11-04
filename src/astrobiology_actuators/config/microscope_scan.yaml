@@ -47,7 +47,7 @@ pos_tolerance_mm: 0.001 # warn if pos differs from target by more (1 step = 0.00
 # Overwritten every run.  If a capture fails the scan warns and carries on.
 camera:
   enabled: true
-  device: /dev/video2   # check with: ls /dev/video*  (can renumber after a reboot)
+  device: /dev/uv_microscope_cam   # udev link to the Pi CSI camera (docs/microscope_scan.md)
   image_dir: "~/Pictures"
   image_prefix: test
   skip_frames: 5        # frames dropped before the saved one, for auto-exposure

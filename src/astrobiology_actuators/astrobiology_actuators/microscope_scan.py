@@ -257,7 +257,7 @@ class ScanConfig:
     pos_tolerance_mm: float = 0.001
     calibrated: bool = False    # set true once the offsets are measured
     camera_enabled: bool = True
-    camera_device: str = '/dev/video2'
+    camera_device: str = '/dev/uv_microscope_cam'
     image_dir: Path = Path('~/Pictures')    # <image_prefix><n>.jpg, overwritten every run
     image_prefix: str = 'test'
     skip_frames: int = 5            # frames dropped before the saved one (auto-exposure)
@@ -301,7 +301,7 @@ class ScanConfig:
     def _camera_fields(cam):
         return {
             'camera_enabled': bool(cam.get('enabled', True)),
-            'camera_device': str(cam.get('device', '/dev/video2')),
+            'camera_device': str(cam.get('device', '/dev/uv_microscope_cam')),
             'image_dir': Path(str(cam.get('image_dir', '~/Pictures'))),
             'image_prefix': str(cam.get('image_prefix', 'test')),
             'skip_frames': int(cam.get('skip_frames', 5)),
@@ -652,7 +652,7 @@ def build_parser():
                    help='CSV path (default: scans/microscope_scan_<time>.csv)')
     p.add_argument('--no-images', action='store_true', help="don't take pictures")
     p.add_argument('--camera', metavar='DEVICE',
-                   help='camera device, overriding the config (e.g. /dev/video2)')
+                   help='camera device, overriding the config (e.g. /dev/video0)')
     p.add_argument('--image-dir', type=Path, metavar='DIR',
                    help='where test1.jpg ... go, overriding the config')
     p.set_defaults(func=_cmd_scan)

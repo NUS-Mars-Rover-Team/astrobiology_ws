@@ -248,7 +248,7 @@ def test_cli_rejects_levels_beyond_travel(capsys):
 def test_camera_defaults_without_camera_block():
     cfg = make_cfg()
     assert cfg.camera_enabled is True
-    assert cfg.camera_device == '/dev/video2'
+    assert cfg.camera_device == '/dev/uv_microscope_cam'
     assert cfg.image_path(3) == Path('~/Pictures/test3.jpg').expanduser()
 
 
