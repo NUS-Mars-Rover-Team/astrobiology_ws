@@ -23,7 +23,7 @@ Config: [`src/astrobiology_actuators/config/microscope_scan.yaml`](../src/astrob
 | Z travel limit | **Open:** capped at 5 mm in the config until measured |
 | Real Z levels 0–40 mm (0–4 cm) | **Open:** needs the Z travel limit first |
 | `z_offset_mm` (Z of the first level) | **Open:** 0 for now; tune with the microscope view |
-| Microscope / grid offsets | **Open:** set so the pattern is centred at X/Y 20, 20; re-measure |
+| Microscope / grid offsets | Pattern centred at gantry X/Y 28, 15 (measured under the microscope) |
 | `/dev/esp_steppers` udev rule | **Open:** points at the Raman adapter; see [Serial port](#serial-port) |
 
 ## Quick start (on the Pi)
@@ -137,7 +137,7 @@ frames so auto-exposure has settled. They go to `~/Pictures/test1.jpg` … `test
 | `calibrated` | `true` | The live scan refuses to run while this is `false` (`--dry-run` always works) |
 | `grid_size` | 40 × 40 | Cache size in mm |
 | `grid_offset` | 0, 0 | Grid origin corner on the tray |
-| `microscope_offset` | 40, 40 | Lens position. With the values above this centres the pattern at gantry X/Y 20, 20 |
+| `microscope_offset` | 48, 35 | Lens position. With the values above this centres the pattern at gantry X/Y 28, 15 (centre + 20, half the grid) |
 | `travel_min` / `travel_max` | X 11.275–86.275, Y 2.55–77.55, Z 0–5 | Safe gantry range. Any point outside it is rejected before motion |
 | `scan_origin` | `null` | First grid point in grid coordinates; `null` centres the pattern in the grid |
 | `pitch_mm`, `n_x`, `n_y` | 1.0, 2, 2 | Grid spacing and size |

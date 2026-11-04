@@ -14,11 +14,11 @@
 calibrated: true
 
 # Cache is 40 x 40 mm.  These offsets put the 2 x 2 pattern's centre at gantry
-# X/Y = 20, 20 (the cache centre in the sketch) -- re-measure once the
-# microscope position is known.
+# X/Y = 28, 15 (measured centre under the microscope): microscope_offset =
+# centre + 20 (half the grid).
 grid_size:         {x: 40.0, y: 40.0}
 grid_offset:       {x: 0.0,  y: 0.0}
-microscope_offset: {x: 40.0, y: 40.0}
+microscope_offset: {x: 48.0, y: 35.0}
 
 # Safe gantry travel (the 75 x 75 box).  Z max is deliberately small until the
 # Z travel is measured: raise it before using the 0-40 mm levels below.

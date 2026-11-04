@@ -118,7 +118,7 @@ def test_shipped_yaml_is_the_trial_scan():
     validate(cfg, points)
     assert len(points) == 20
     centre = {k: sum(p.target[k] for p in points) / len(points) for k in 'xy'}
-    assert centre == {'x': 20.0, 'y': 20.0}
+    assert centre == {'x': 28.0, 'y': 15.0}
     assert max(p.target['z'] for p in points) <= cfg.travel_max['z']
 
 
