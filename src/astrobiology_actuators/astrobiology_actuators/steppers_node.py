@@ -52,10 +52,12 @@ class SteppersNode(Node):
 
         self._dry_run = self.get_parameter('dry_run').value
         self._busy = {name: False for name in MOTORS}
-        # Reverse lookup: firmware feedback name → service name
-        self._feedback_to_service = {
-            fb: svc for svc, (_, fb) in MOTORS.items()
-        }
+        # Reverse lookup: firmware feedback name → service name.  The firmware
+        # replies with the short id (done f ...); older builds used the full name.
+        self._feedback_to_service = {}
+        for svc, (cmd, fb) in MOTORS.items():
+            self._feedback_to_service[cmd] = svc
+            self._feedback_to_service[fb] = svc
 
         # Serial port
         self._lock = threading.Lock()
@@ -201,8 +203,8 @@ class SteppersNode(Node):
                 self.get_logger().info(f'esp: {line}')
 
     def _clear_busy(self, firmware_name):
-        # Firmware feedback uses full names (pump, flush, centrifuge, x, y, z);
-        # _busy keys are service names (pump, flush, centrifuge, x_gantry, y_gantry, z_gantry)
+        # Firmware feedback uses short ids (p, f, c, x, y, z) or, on older builds,
+        # full names; _busy keys are service names (pump, ..., x_gantry, ...)
         svc = self._feedback_to_service.get(firmware_name)
         if svc is None:
             return

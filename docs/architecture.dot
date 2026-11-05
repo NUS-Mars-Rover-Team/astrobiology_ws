@@ -25,7 +25,7 @@ digraph astrobiology {
             shape=box3d style=filled fillcolor="#FFE0B2"
         ];
         esp_lights [
-            label="ESP32\nScience Lights\nController\n(UVM, UVC, laser, halogen)"
+            label="Arduino\nScience Lights\n(LEDdrill.ino)\n(UVM, UVC, laser, halogen)"
             shape=box3d style=filled fillcolor="#FFE0B2"
         ];
         spectro_cam [
@@ -161,7 +161,7 @@ digraph astrobiology {
 
     // ── Edges: hardware → nodes ──────────────────────────────
     esp_steppers -> steppers_node      [label="serial\n/dev/esp_steppers\n115200\ng1 protocol" style=bold color="#E65100"];
-    esp_lights   -> lights_node    [label="serial\n/dev/esp_lights\n115200\nNAME 0|1" style=bold color="#E65100"];
+    esp_lights   -> lights_node    [label="serial\n/dev/esp_lights\n9600\n<light> on|off" style=bold color="#E65100"];
     spectro_cam  -> spectrum_node  [label="V4L2\n/dev/spectroscope" style=bold color="#E65100"];
 
     // ── Edges: nodes → topics ────────────────────────────────

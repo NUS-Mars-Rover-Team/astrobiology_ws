@@ -13,7 +13,7 @@ Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into
 | Device | Interface | udev alias |
 |--------|-----------|------------|
 | ESP32 6-channel stepper controller (CH340) | Serial 115200 (custom G1, see below) | `/dev/esp_steppers` (see [udev rules](#udev-rules)) |
-| ESP32 science lights controller | Serial 115200 (NAME 0\|1) | `/dev/esp_lights` |
+| Arduino science lights + drill controller (`firmware/LEDdrill.ino`) | Serial 9600 (`<light> on\|off`) | `/dev/esp_lights` |
 | Sonix spectroscope camera | V4L2 (1920x1080 MJPG) | `/dev/spectroscope` |
 | Microscope camera (Pi CSI, MMAL `bcm2835-v4l2`) | V4L2 | `/dev/uv_microscope_cam` |
 
@@ -34,14 +34,16 @@ Endstops trigger HIGH and the axes home in the negative direction, so gantry coo
 ≥ 0 from the endstops. GPIO34/35 have no internal pull resistors, so X and Y need external
 pull-downs.
 
-### ESP32 Science Lights Channels
+### Science Lights Channels (Arduino, `firmware/LEDdrill.ino`)
 
-| Light | Firmware name | GPIO |
-|-------|--------------|------|
-| UVM LED | UVM | 25 |
-| UVC LED | UVC | 26 |
-| Laser | LAS | 27 |
-| Halogen | HAL | 33 |
+Each light is switched by a MOSFET.
+
+| Light | Firmware name | Pin |
+|-------|--------------|-----|
+| UVM LED | uvm | 12 |
+| UVC LED | uvc | 11 |
+| Laser | laser | 10 |
+| Halogen | halogen | 9 |
 
 ## Packages
 
@@ -80,7 +82,7 @@ Create `/etc/udev/rules.d/99-astrobiology.rules` (on the current Pi the serial r
 #   udevadm info -q property -n /dev/ttyUSBn | grep '^ID_PATH='
 SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.4.3:1.0", SYMLINK+="esp_steppers", MODE="0660", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
 
-# ESP32 science lights controller — update idVendor/idProduct or use ATTRS{serial} to distinguish from esp_steppers
+# Arduino science lights controller — update idVendor/idProduct or use ATTRS{serial} to distinguish from esp_steppers
 SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="esp_lights", MODE="0666"
 
 # Pi CSI microscope camera (MMAL / bcm2835-v4l2), capture node only. /dev/videoN renumbers
@@ -288,17 +290,20 @@ before sending another `g1` to the same motor. Different motors can move at the 
 Speed is limited to 1–100000 steps/s (31.25 mm/s on the gantry), and acceleration to
 1–1000000 steps/s².
 
-### Science lights ESP32 protocol
+### Science lights Arduino protocol
 
-The lights ESP32 accepts line-based commands at 115200 baud:
+`firmware/LEDdrill.ino` accepts line-based commands at 9600 baud (case-insensitive):
 
 ```
-<NAME> <0|1>       Set light on (1) or off (0)
+<light> on | off   Light on or off; lights: uvm, uvc, laser, halogen
+drill f | r | s    Drill forward / reverse / stop (not exposed as a ROS service)
 ```
 
-Light names: `UVM`, `UVC`, `LAS`, `HAL`.
+It replies `<NAME> ON` / `<NAME> OFF` (e.g. `UVM ON`, `Laser OFF`), or `Invalid command: <text>`.
+Opening the port resets the Arduino, which turns every light off.
 
-The ESP32 echoes back `<NAME> <val>\n` on success. Unrecognized names are silently dropped.
+The sketch waits only 50 ms between characters, so send each command in one write (as
+`lights_node` does). Typing letter by letter in picocom or screen gets `Invalid command: u`.
 
 ### Stepper firmware feedback
 
