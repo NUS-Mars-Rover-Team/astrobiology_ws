@@ -23,8 +23,8 @@ HIGH/LOW to switch lights on and off.
 
 | Light | Firmware name | GPIO | Use case |
 |---|---|---|---|
-| UV LED 1 | UV1 | 25 | UV fluorescence excitation |
-| UV LED 2 | UV2 | 26 | UV fluorescence excitation |
+| UVM LED | UVM | 25 | UV fluorescence excitation |
+| UVC LED | UVC | 26 | UV fluorescence excitation |
 | Laser | LAS | 27 | Spectroscope line source / alignment |
 | Halogen | HAL | 33 | Broadband illumination for absorption spectra |
 
@@ -36,7 +36,7 @@ Send a line `<NAME> <0|1>\n`. The ESP32 echoes back `<NAME> <val>\n` on success.
 Unrecognized names are silently dropped.
 
 ```
-UV1 1      → turn UV LED 1 on     → echo: UV1 1
+UVM 1      → turn UVM LED on     → echo: UVM 1
 LAS 0      → turn laser off       → echo: LAS 0
 ```
 
@@ -60,8 +60,8 @@ Commands are instantaneous (`digitalWrite`), so there is no busy state or comple
 
 | Service | Type | Description |
 |---|---|---|
-| `/astrobiology/uv1/set` | `std_srvs/SetBool` | UV LED 1 on/off |
-| `/astrobiology/uv2/set` | `std_srvs/SetBool` | UV LED 2 on/off |
+| `/astrobiology/uvm/set` | `std_srvs/SetBool` | UVM LED on/off |
+| `/astrobiology/uvc/set` | `std_srvs/SetBool` | UVC LED on/off |
 | `/astrobiology/laser/set` | `std_srvs/SetBool` | Laser on/off |
 | `/astrobiology/halogen/set` | `std_srvs/SetBool` | Halogen lamp on/off |
 
@@ -96,7 +96,7 @@ ros2 launch astrobiology_actuators lights.launch.py dry_run:=true
 
 ```bash
 ros2 service call /astrobiology/laser/set std_srvs/srv/SetBool "{data: true}"
-ros2 service call /astrobiology/uv1/set std_srvs/srv/SetBool "{data: false}"
+ros2 service call /astrobiology/uvm/set std_srvs/srv/SetBool "{data: false}"
 ```
 
 ### Direct serial debugging

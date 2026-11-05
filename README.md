@@ -38,8 +38,8 @@ pull-downs.
 
 | Light | Firmware name | GPIO |
 |-------|--------------|------|
-| UV LED 1 | UV1 | 25 |
-| UV LED 2 | UV2 | 26 |
+| UVM LED | UVM | 25 |
+| UVC LED | UVC | 26 |
 | Laser | LAS | 27 |
 | Halogen | HAL | 33 |
 
@@ -112,7 +112,7 @@ This starts `steppers_node` with 12 services (move + stop for each of 6 motors).
 ros2 launch astrobiology_actuators lights.launch.py
 ```
 
-This starts `lights_node` with 4 services (SetBool for UV1, UV2, laser, halogen).
+This starts `lights_node` with 4 services (SetBool for UVM, UVC, laser, halogen).
 
 ### Launch spectrometer
 
@@ -144,8 +144,8 @@ Each light has a `SetBool` service (`data: true` = ON, `data: false` = OFF):
 # Turn laser on
 ros2 service call /astrobiology/laser/set std_srvs/srv/SetBool "{data: true}"
 
-# Turn UV1 off
-ros2 service call /astrobiology/uv1/set std_srvs/srv/SetBool "{data: false}"
+# Turn UVM off
+ros2 service call /astrobiology/uvm/set std_srvs/srv/SetBool "{data: false}"
 ```
 
 All lights are turned off automatically when the node shuts down.
@@ -204,8 +204,8 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/y_gantry/stop` | Trigger | Stop Y axis |
 | `/astrobiology/z_gantry/move` | StepperMove | Gantry Z axis |
 | `/astrobiology/z_gantry/stop` | Trigger | Stop Z axis |
-| `/astrobiology/uv1/set` | SetBool | UV LED 1 on/off |
-| `/astrobiology/uv2/set` | SetBool | UV LED 2 on/off |
+| `/astrobiology/uvm/set` | SetBool | UVM LED on/off |
+| `/astrobiology/uvc/set` | SetBool | UVC LED on/off |
 | `/astrobiology/laser/set` | SetBool | Laser on/off |
 | `/astrobiology/halogen/set` | SetBool | Halogen lamp on/off |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
@@ -296,7 +296,7 @@ The lights ESP32 accepts line-based commands at 115200 baud:
 <NAME> <0|1>       Set light on (1) or off (0)
 ```
 
-Light names: `UV1`, `UV2`, `LAS`, `HAL`.
+Light names: `UVM`, `UVC`, `LAS`, `HAL`.
 
 The ESP32 echoes back `<NAME> <val>\n` on success. Unrecognized names are silently dropped.
 

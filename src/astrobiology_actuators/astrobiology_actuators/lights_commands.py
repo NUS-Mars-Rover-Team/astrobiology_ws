@@ -5,8 +5,8 @@ Protocol: send "<NAME> <0|1>\\n" to the ESP32, receive echo.
 
 # service_name -> firmware command name
 LIGHTS = {
-    'uv1':     'UV1',
-    'uv2':     'UV2',
+    'uvm':     'UVM',
+    'uvc':     'UVC',
     'laser':   'LAS',
     'halogen': 'HAL',
 }
