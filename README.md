@@ -14,6 +14,7 @@ Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into
 |--------|-----------|------------|
 | ESP32 6-channel stepper controller (CH340) | Serial 115200 (custom G1, see below) | `/dev/esp_steppers` (see [udev rules](#udev-rules)) |
 | Arduino science lights + drill controller (`firmware/LEDdrill.ino`) | Serial 9600 (`<light> on\|off`) | `/dev/esp_lights` |
+| Arduino drill controller (`firmware/LAdrill.ino`) | Serial 9600 (single chars `b`/`s`) | `/dev/uno_drill` |
 | Sonix spectroscope camera | V4L2 (1920x1080 MJPG) | `/dev/spectroscope` |
 | Microscope camera (Pi CSI, MMAL `bcm2835-v4l2`) | V4L2 | `/dev/uv_microscope_cam` |
 
@@ -85,6 +86,9 @@ SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1
 # Arduino science lights controller — update idVendor/idProduct or use ATTRS{serial} to distinguish from esp_steppers
 SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="esp_lights", MODE="0666"
 
+# Arduino drill controller — same caveat: match by ATTRS{serial} or ENV{ID_PATH} if the IDs clash
+SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="uno_drill", MODE="0666"
+
 # Pi CSI microscope camera (MMAL / bcm2835-v4l2), capture node only. /dev/videoN renumbers
 # when USB cameras are plugged in, so microscope_scan uses this link.
 SUBSYSTEM=="video4linux", ATTR{name}=="camera0", ATTR{index}=="0", SYMLINK+="uv_microscope_cam", MODE="0660", GROUP="video"
@@ -115,6 +119,14 @@ ros2 launch astrobiology_actuators lights.launch.py
 ```
 
 This starts `lights_node` with 4 services (SetBool for UVM, UVC, laser, halogen).
+
+### Launch drill
+
+```bash
+ros2 launch astrobiology_actuators drill.launch.py
+```
+
+This starts `drill_node` with 2 Trigger services (`drill/start`, `drill/stop`).
 
 ### Launch spectrometer
 
@@ -151,6 +163,16 @@ ros2 service call /astrobiology/uvm/set std_srvs/srv/SetBool "{data: false}"
 ```
 
 All lights are turned off automatically when the node shuts down.
+
+### Drill control
+
+```bash
+ros2 service call /astrobiology/drill/start std_srvs/srv/Trigger   # sends b (drill runs backward)
+ros2 service call /astrobiology/drill/stop std_srvs/srv/Trigger    # sends s (stop, coast)
+```
+
+The node's log shows the Arduino's reply (`arduino: Motor: BACKWARD`). The drill is stopped
+automatically when the node shuts down.
 
 ### Microscope grid scan
 
@@ -210,6 +232,8 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/uvc/set` | SetBool | UVC LED on/off |
 | `/astrobiology/laser/set` | SetBool | Laser on/off |
 | `/astrobiology/halogen/set` | SetBool | Halogen lamp on/off |
+| `/astrobiology/drill/start` | Trigger | Start the drill (`b`) |
+| `/astrobiology/drill/stop` | Trigger | Stop the drill (`s`) |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
 
@@ -296,7 +320,7 @@ Speed is limited to 1–100000 steps/s (31.25 mm/s on the gantry), and accelerat
 
 ```
 <light> on | off   Light on or off; lights: uvm, uvc, laser, halogen
-drill f | r | s    Drill forward / reverse / stop (not exposed as a ROS service)
+drill f | r | s    Drill forward / reverse / stop (unused: the drill is on LAdrill.ino)
 ```
 
 It replies `<NAME> ON` / `<NAME> OFF` (e.g. `UVM ON`, `Laser OFF`), or `Invalid command: <text>`.
@@ -304,6 +328,19 @@ Opening the port resets the Arduino, which turns every light off.
 
 The sketch waits only 50 ms between characters, so send each command in one write (as
 `lights_node` does). Typing letter by letter in picocom or screen gets `Invalid command: u`.
+
+### Drill Arduino protocol
+
+`firmware/LAdrill.ino` reads single characters at 9600 baud (newlines ignored, case-insensitive):
+
+```
+f   Forward at PWM 200    -> Motor: FORWARD
+b   Backward at PWM 200   -> Motor: BACKWARD        (drill/start)
+s   Stop, driver disabled -> Motor: STOP (Coasting) (drill/stop)
+```
+
+Anything else replies `Invalid command. Use f, b, or s.` Single characters mean typing in
+picocom works.
 
 ### Stepper firmware feedback
 

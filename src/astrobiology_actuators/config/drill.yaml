@@ -1,0 +1,6 @@
+# Drill node parameters (Arduino running firmware/LAdrill.ino).
+drill_node:
+  ros__parameters:
+    port: /dev/uno_drill
+    baud: 9600
+    dry_run: false
