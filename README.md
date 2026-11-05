@@ -12,27 +12,34 @@ Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into
 
 | Device | Interface | udev alias |
 |--------|-----------|------------|
-| ESP32 6-channel stepper controller | Serial 115200 (g1 protocol) | `/dev/esp_steppers` |
+| ESP32 6-channel stepper controller (CH340) | Serial 115200 (custom G1, see below) | `/dev/esp_steppers` (see [udev rules](#udev-rules)) |
 | ESP32 science lights controller | Serial 115200 (NAME 0\|1) | `/dev/esp_lights` |
 | Sonix spectroscope camera | V4L2 (1920x1080 MJPG) | `/dev/spectroscope` |
+| Microscope camera (Pi CSI, MMAL `bcm2835-v4l2`) | V4L2 | `/dev/uv_microscope_cam` |
 
 ### ESP32 Motor Channels
 
-| Channel | Firmware name | Short | STEP | DIR | EN |
-|---------|--------------|-------|------|-----|----|
-| Pump | pump | p | 2 | 4 | 15 |
-| Flush | flush | f | 18 | 19 | 15 |
-| Centrifuge | centrifuge | c | 16 | 17 | 15 |
-| X gantry | x | x | 32 | 33 | 5 |
-| Y gantry | y | y | 26 | 27 | 25 |
-| Z gantry | z | z | 12 | 13 | 14 |
+Pins as in the current stepper firmware (TMC2208 drivers, hardware-timer step generation):
+
+| Channel | Firmware name | Short | STEP | DIR | EN | Endstop | Units |
+|---------|--------------|-------|------|-----|----|---------|-------|
+| Z gantry | z | z | 2 | 4 | 15 | GPIO21 | mm (3200 steps/mm) |
+| Y gantry | y | y | 16 | 17 | 15 | GPIO34 | mm (3200 steps/mm) |
+| X gantry | x | x | 18 | 19 | 15 | GPIO35 | mm (3200 steps/mm) |
+| Centrifuge | centrifuge | c | 32 | 33 | 5 | — | rev, RPM (1600 steps/rev) |
+| Pump | pump | p | 26 | 27 | 25 | — | raw pulses |
+| Flush | flush | f | 12 | 13 | 14 | — | raw pulses |
+
+Endstops trigger HIGH and the axes home in the negative direction, so gantry coordinates are
+≥ 0 from the endstops. GPIO34/35 have no internal pull resistors, so X and Y need external
+pull-downs.
 
 ### ESP32 Science Lights Channels
 
 | Light | Firmware name | GPIO |
 |-------|--------------|------|
-| UV LED 1 | UV1 | 25 |
-| UV LED 2 | UV2 | 26 |
+| UVM LED | UVM | 25 |
+| UVC LED | UVC | 26 |
 | Laser | LAS | 27 |
 | Halogen | HAL | 33 |
 
@@ -40,7 +47,7 @@ Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into
 
 | Package | Description |
 |---------|-------------|
-| `astrobiology_actuators` | Stepper motor node and science lights node |
+| `astrobiology_actuators` | Stepper motor node, science lights node, and the `microscope_scan` gantry/microscope tool |
 | `spectro_cam` | USB spectrometer node (capture, process, publish spectra) |
 | `astrobiology_interfaces` | Service definitions (`StepperMove.srv`, etc.) |
 | `astrobiology_msgs` | Legacy message/service definitions (`Spectrum.msg`, `MotorStatus.msg`) |
@@ -64,14 +71,21 @@ source install/setup.bash
 
 ### udev rules
 
-Create `/etc/udev/rules.d/99-astrobiology.rules`:
+Create `/etc/udev/rules.d/99-astrobiology.rules` (on the current Pi the serial rules are in
+`99-mrt-serial.rules`):
 
 ```
-# ESP32 stepper controller (CP2102)
-SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="esp_steppers", MODE="0666"
+# ESP32 stepper controller. It is a CH340 (1a86:7523), the same chip as the Raman spectrometer's
+# RS232 adapter, so match it by USB port, not by vendor/product ID. Check the path with:
+#   udevadm info -q property -n /dev/ttyUSBn | grep '^ID_PATH='
+SUBSYSTEM=="tty", ENV{ID_PATH}=="platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1.4.3:1.0", SYMLINK+="esp_steppers", MODE="0660", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
 
 # ESP32 science lights controller — update idVendor/idProduct or use ATTRS{serial} to distinguish from esp_steppers
 SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="esp_lights", MODE="0666"
+
+# Pi CSI microscope camera (MMAL / bcm2835-v4l2), capture node only. /dev/videoN renumbers
+# when USB cameras are plugged in, so microscope_scan uses this link.
+SUBSYSTEM=="video4linux", ATTR{name}=="camera0", ATTR{index}=="0", SYMLINK+="uv_microscope_cam", MODE="0660", GROUP="video"
 
 # Sonix spectroscope camera
 SUBSYSTEM=="video4linux", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="spectroscope", MODE="0666"
@@ -87,10 +101,10 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ### Launch all stepper motors
 
 ```bash
-ros2 launch astrobiology_actuators pumps.launch.py
+ros2 launch astrobiology_actuators steppers.launch.py
 ```
 
-This starts `pump_node` with 12 services (move + stop for each of 6 motors).
+This starts `steppers_node` with 12 services (move + stop for each of 6 motors).
 
 ### Launch science lights
 
@@ -98,7 +112,7 @@ This starts `pump_node` with 12 services (move + stop for each of 6 motors).
 ros2 launch astrobiology_actuators lights.launch.py
 ```
 
-This starts `lights_node` with 4 services (SetBool for UV1, UV2, laser, halogen).
+This starts `lights_node` with 4 services (SetBool for UVM, UVC, laser, halogen).
 
 ### Launch spectrometer
 
@@ -130,15 +144,36 @@ Each light has a `SetBool` service (`data: true` = ON, `data: false` = OFF):
 # Turn laser on
 ros2 service call /astrobiology/laser/set std_srvs/srv/SetBool "{data: true}"
 
-# Turn UV1 off
-ros2 service call /astrobiology/uv1/set std_srvs/srv/SetBool "{data: false}"
+# Turn UVM off
+ros2 service call /astrobiology/uvm/set std_srvs/srv/SetBool "{data: false}"
 ```
 
 All lights are turned off automatically when the node shuts down.
 
+### Microscope grid scan
+
+`microscope_scan` homes the gantry, steps the cache tray through a 2 × 2 grid at five Z levels,
+logs each position to a CSV and saves a picture at each point (`~/Pictures/test1.jpg` …
+`test20.jpg`). It also has `pos` / `home` / `goto` commands for jogging the gantry. It talks
+to the stepper ESP32 directly, so stop `steppers_node` first.
+
+```bash
+ros2 run astrobiology_actuators microscope_scan --port /dev/ttyUSB1 scan --dry-run
+ros2 run astrobiology_actuators microscope_scan --port /dev/ttyUSB1 scan
+```
+
+Full guide (commands, config, coordinate model, viewing the pictures, troubleshooting):
+[`docs/microscope_scan.md`](docs/microscope_scan.md).
+
 ### Stepper motor control
 
 All motors use the `StepperMove` service (`steps`, `speed_hz`, `accel_hz2`):
+
+> **Known issue:** `steppers_node` forwards `steps`/`speed_hz`/`accel_hz2` to the firmware unchanged,
+> but the current firmware reads the gantry axes in mm, mm/s and mm/s², and the centrifuge in
+> rev, RPM and RPM/s. The x/y/z gantry and centrifuge services therefore move by the wrong
+> amount, or are rejected as out of range. Until `steppers_node` is updated, move the gantry with
+> `microscope_scan goto`. Pump and flush are still raw pulses and unaffected.
 
 ```bash
 # Move pump 3200 steps forward at 800 steps/s, 400 steps/s² accel
@@ -169,8 +204,8 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/y_gantry/stop` | Trigger | Stop Y axis |
 | `/astrobiology/z_gantry/move` | StepperMove | Gantry Z axis |
 | `/astrobiology/z_gantry/stop` | Trigger | Stop Z axis |
-| `/astrobiology/uv1/set` | SetBool | UV LED 1 on/off |
-| `/astrobiology/uv2/set` | SetBool | UV LED 2 on/off |
+| `/astrobiology/uvm/set` | SetBool | UVM LED on/off |
+| `/astrobiology/uvc/set` | SetBool | UVC LED on/off |
 | `/astrobiology/laser/set` | SetBool | Laser on/off |
 | `/astrobiology/halogen/set` | SetBool | Halogen lamp on/off |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
@@ -227,19 +262,31 @@ string message
 
 ## Serial protocol (ESP32 firmware)
 
-The ESP32 accepts line-based commands at 115200 baud:
+The stepper ESP32 accepts line-based commands at 115200 baud (newline or CR terminated,
+case-insensitive, decimals allowed but no exponents). It is a custom G1 syntax, not standard
+CNC G-code:
 
 ```
-g1 <motor> <signed_steps> <speed_hz> <accel_hz2>    Move motor
-stop <motor|all>                                     Smooth stop
-estop [motor|all]                                    Emergency stop
-enable <motor|all> on|off                            Enable/disable driver
-status [motor|all]                                   Show position and state
-zero <motor|all>                                     Reset step counter
-help                                                 Print help
+g1 <motor> <distance> <speed> <accel>   Relative move, in the motor's units (table above)
+                                        e.g. g1 x 10.5 5 2    X +10.5 mm at 5 mm/s, 2 mm/s^2
+                                             g1 c 2 120 60    centrifuge 2 rev at 120 RPM
+                                             g1 p 3200 800 400  pump 3200 pulses
+pos | m114                              Print all coordinates: pos Z:.. Y:.. X:.. C:.. P:.. F:..
+g28 [x] [y] [z]                         Home onto endstops (always Z, Y, X order); sets pos to 0
+stop <motor|all>                        Decelerate, then halt
+estop [motor|all]                       Emergency stop (drivers disabled; re-home after)
+!                                       Single byte, no Enter: instant estop of everything
+enable <motor|all> on|off               Enable/disable driver
+status [motor|all]                      State, endstop, steps and position
+zero <motor|all>                        Set the position to 0 (motor must be idle)
+diag                                    Timer ISR rate
+help                                    Print help
 ```
 
-Motor IDs: `pump` (`p`), `flush` (`f`), `centrifuge` (`c`), `x`, `y`, `z`.
+Motor IDs: `pump` (`p`), `flush` (`f`), `centrifuge` (`c`), `x`, `y`, `z`. Wait for `done`
+before sending another `g1` to the same motor. Different motors can move at the same time.
+Speed is limited to 1–100000 steps/s (31.25 mm/s on the gantry), and acceleration to
+1–1000000 steps/s².
 
 ### Science lights ESP32 protocol
 
@@ -249,24 +296,31 @@ The lights ESP32 accepts line-based commands at 115200 baud:
 <NAME> <0|1>       Set light on (1) or off (0)
 ```
 
-Light names: `UV1`, `UV2`, `LAS`, `HAL`.
+Light names: `UVM`, `UVC`, `LAS`, `HAL`.
 
 The ESP32 echoes back `<NAME> <val>\n` on success. Unrecognized names are silently dropped.
 
 ### Stepper firmware feedback
 
 ```
-ok <motor> accepted          Move started
-done <motor> steps=<N>       Move completed
-stopped <motor> steps=<N>    Smooth stop completed
-error busy: <motor>          Motor already moving
+ok <motor> accepted                    Move started
+done <motor> steps=<N> pos=<units>     Move completed
+stopped <motor> steps=<N> pos=<units>  Smooth stop completed
+error busy: <motor>                    Motor already moving or homing
+error bad number for <motor>: ...      Distance/speed/accel out of range (limits in units)
+ok g28 accepted: z y x                 Homing queued
+homing <axis> / homed <axis> steps=0   Per-axis homing progress
+done g28                               All requested axes homed
+error homing failed <axis>: <reason>   Endstop not found / not released
+aborted <motor>; physical position may be lost   After estop
+error line too long or invalid; discarded        Line contained control bytes (e.g. Backspace)
 ```
 
 ## Testing
 
 ```bash
-# Stepper motor tests (no ROS needed)
-python -m pytest src/astrobiology_actuators/test/ -v
+# Stepper motor, lights and microscope_scan tests (no ROS or hardware needed)
+cd src/astrobiology_actuators && python3 -m pytest test/ -v
 
 # Spectrometer processing tests
 colcon test --packages-select spectro_cam && colcon test-result --verbose
@@ -274,10 +328,12 @@ colcon test --packages-select spectro_cam && colcon test-result --verbose
 
 ## Direct serial debugging
 
-If you need to bypass ROS and talk to the ESP32 directly:
+If you need to bypass ROS and talk to the ESP32 directly (stop `steppers_node` first):
 
 ```bash
-screen /dev/esp_steppers 115200
+picocom -b 115200 --echo --imap lfcrlf /dev/esp_steppers   # quit: Ctrl+A then Ctrl+X
 ```
 
-Type commands like `g1 p 3200 800 400`. Exit with `Ctrl+A`, `K`, `Y`.
+Type commands like `pos`, `status x` or `g1 x 2 2 5`. Retype a mistyped line in full: the
+firmware discards any line containing Backspace or arrow-key bytes. Typing `!` stops every
+motor instantly.

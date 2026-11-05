@@ -275,14 +275,14 @@ Toggle a light on or off.
 | **Res** | `success` | `bool` | Whether it succeeded |
 | **Res** | `message` | `string` | Informational |
 
-Servers: `/astrobiology/uv1/set`, `/astrobiology/uv2/set`, `/astrobiology/laser/set`, `/astrobiology/halogen/set`
+Servers: `/astrobiology/uvm/set`, `/astrobiology/uvc/set`, `/astrobiology/laser/set`, `/astrobiology/halogen/set`
 
 ```bash
 # Turn laser on
 ros2 service call /astrobiology/laser/set std_srvs/srv/SetBool "{data: true}"
 
-# Turn UV1 off
-ros2 service call /astrobiology/uv1/set std_srvs/srv/SetBool "{data: false}"
+# Turn UVM off
+ros2 service call /astrobiology/uvm/set std_srvs/srv/SetBool "{data: false}"
 ```
 
 ### `sensor_msgs/msg/CompressedImage`

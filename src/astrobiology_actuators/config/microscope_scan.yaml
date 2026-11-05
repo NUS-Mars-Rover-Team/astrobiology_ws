@@ -1,0 +1,53 @@
+# Microscope grid scan (microscope_scan scan).  Plain YAML, not ROS params.
+#
+# All lengths are mm in the gantry frame: home = the endstops = 0/0/0, and
+# positive moves away from them.  Z = 0 is clear (tray furthest from the
+# microscope); +Z moves the tray toward it.
+#
+# The gantry moves the cache tray under a fixed microscope, so grid point p is
+# under the lens when the gantry is at
+#     X, Y = microscope_offset - (grid_offset + p)
+#     Z    = z_offset_mm + z level
+# Z goes back to 0 before every X/Y move.
+
+# The live scan refuses to run while this is false; --dry-run works either way.
+calibrated: true
+
+# Cache is 40 x 40 mm.  These offsets put the 2 x 2 pattern's centre at gantry
+# X/Y = 28, 15 (measured centre under the microscope): microscope_offset =
+# centre + 20 (half the grid).
+grid_size:         {x: 40.0, y: 40.0}
+grid_offset:       {x: 0.0,  y: 0.0}
+microscope_offset: {x: 48.0, y: 35.0}
+
+# Safe gantry travel (the 75 x 75 box).  Z max is deliberately small until the
+# Z travel is measured: raise it before using the 0-40 mm levels below.
+travel_min: {x: 11.275, y: 2.55,  z: 0.0}
+travel_max: {x: 86.275, y: 77.55, z: 5.0}
+
+# 2 x 2 pattern at 1 mm pitch.  scan_origin is the first point in grid
+# coordinates, e.g. {x: 10.0, y: 10.0}; null centres the pattern in the grid.
+scan_origin: null
+pitch_mm: 1.0
+n_x: 2
+n_y: 2
+
+# Z levels, visited in order at every X/Y position.  Trial: 0-4 mm.
+# Target: [0.0, 10.0, 20.0, 30.0, 40.0] (0-4 cm) once travel_max.z allows it.
+z_offset_mm: 0.0
+z_levels_mm: [0.0, 1.0, 2.0, 3.0, 4.0]
+
+speed_mm_s: 5.0         # firmware max 31.25
+accel_mm_s2: 10.0       # firmware max 312.5
+settle_s: 0.5           # wait after each move before reading pos
+pos_tolerance_mm: 0.001 # warn if pos differs from target by more (1 step = 0.0003)
+
+# A picture at every point: <image_dir>/<image_prefix>1.jpg ... in scan order
+# (test1-5 = the Z levels at the first X/Y position, test6-10 the next, ...).
+# Overwritten every run.  If a capture fails the scan warns and carries on.
+camera:
+  enabled: true
+  device: /dev/uv_microscope_cam   # udev link to the Pi CSI camera (docs/microscope_scan.md)
+  image_dir: "~/Pictures"
+  image_prefix: test
+  skip_frames: 5        # frames dropped before the saved one, for auto-exposure

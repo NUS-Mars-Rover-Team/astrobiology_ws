@@ -1,6 +1,6 @@
-# Pump node parameters.
+# Stepper node parameters (all six ESP32 stepper channels).
 # Steps, speed, and accel come from the StepperMove service request.
-pump_node:
+steppers_node:
   ros__parameters:
     port: /dev/esp_steppers
     baud: 115200
