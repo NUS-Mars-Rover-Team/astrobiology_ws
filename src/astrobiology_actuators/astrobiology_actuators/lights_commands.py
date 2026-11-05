@@ -1,20 +1,21 @@
 """Pure-Python helpers for the science lights serial protocol.
 
-Protocol: send "<NAME> <0|1>\\n" to the ESP32, receive echo.
+Protocol (firmware/LEDdrill.ino): send "<name> on\\n" or "<name> off\\n",
+receive "<NAME> ON" / "<NAME> OFF", or "Invalid command: ..." if not recognised.
 """
 
 # service_name -> firmware command name
 LIGHTS = {
-    'uvm':     'UVM',
-    'uvc':     'UVC',
-    'laser':   'LAS',
-    'halogen': 'HAL',
+    'uvm':     'uvm',
+    'uvc':     'uvc',
+    'laser':   'laser',
+    'halogen': 'halogen',
 }
 
 
 def light_command(fw_name, on):
     """Build a light on/off command string (no newline)."""
-    return f'{fw_name} {1 if on else 0}'
+    return f'{fw_name} {"on" if on else "off"}'
 
 
 def all_off_commands():

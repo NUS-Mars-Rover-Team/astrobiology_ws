@@ -1,7 +1,8 @@
-"""ROS 2 node bridging science-light on/off services to the ESP32 over serial.
+"""ROS 2 node bridging science-light on/off services to the Arduino over serial.
 
 Each light is exposed as a std_srvs/SetBool service.
-Protocol: send "<NAME> <0|1>\n", receive echo "<NAME> <val>\n".
+Protocol (firmware/LEDdrill.ino, 9600 baud): send "<name> on|off\n",
+receive "<NAME> ON|OFF", or "Invalid command: ..." if not recognised.
 """
 
 import threading
@@ -25,7 +26,7 @@ class LightsNode(Node):
         super().__init__('lights_node')
 
         self.declare_parameter('port', '/dev/esp_lights')
-        self.declare_parameter('baud', 115200)
+        self.declare_parameter('baud', 9600)
         self.declare_parameter('dry_run', False)
 
         self._dry_run = self.get_parameter('dry_run').value
@@ -102,7 +103,10 @@ class LightsNode(Node):
                 return
             if not line:
                 continue
-            self.get_logger().debug(f'esp: {line}')
+            if line.startswith('Invalid command'):
+                self.get_logger().warn(f'arduino: {line}')
+            else:
+                self.get_logger().info(f'arduino: {line}')
 
     # -- Shutdown --------------------------------------------------------------
 
