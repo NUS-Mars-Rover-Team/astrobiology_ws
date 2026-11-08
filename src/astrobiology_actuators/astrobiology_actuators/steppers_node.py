@@ -3,6 +3,10 @@
 Pump, flush and centrifuge use StepperMove: the caller passes steps, speed_hz,
 accel_hz2, which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
 
+The two peristaltic pumps, pump (p, extraction) and flush (f, dosing), also take a
+volume: /astrobiology/<pump|flush>/dispense (Dispense) pumps volume_ml using that
+pump's pulses_per_ml parameter and stops by itself; <pump|flush>/stop ends it early.
+
 gantry/{x,y,z}/move use MoveAxis in mm: relative (jog by position_mm) or absolute
 (go to position_mm).  The axis must be homed and the target within 0..travel_max
 (gantry_scan.yaml); the move runs at jog_speed_mm_s and the service replies at once.
@@ -32,9 +36,10 @@ from rclpy.node import Node
 from std_srvs.srv import Trigger
 import yaml
 
-from astrobiology_interfaces.srv import Command, MoveAxis, StepperMove
+from astrobiology_interfaces.srv import Command, Dispense, MoveAxis, StepperMove
 
 from astrobiology_actuators import gantry_scan as gs
+from astrobiology_actuators.pump import PumpConfig, PumpState
 from astrobiology_actuators.serial_commands import (
     estop_command,
     gantry_homed_update,
@@ -55,6 +60,16 @@ MOTORS = {
     'gantry/z':   ('z', 'z'),
 }
 GANTRY = ('gantry/x', 'gantry/y', 'gantry/z')
+
+# Dispensing pumps: MOTORS key -> role on the rover, and their parameters
+PUMPS = {'pump': 'extraction', 'flush': 'dosing'}
+PUMP_DEFAULTS = {
+    'pulses_per_ml': 1000.0,   # placeholder until calibrated
+    'speed_hz': 800,
+    'accel_hz2': 400,
+    'direction': 'cw',         # 'ccw' reverses the pump
+    'max_ml': 50.0,
+}
 
 # Firmware feedback patterns
 _DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
@@ -81,6 +96,9 @@ class SteppersNode(Node):
         self.declare_parameter('handover_y_mm', 105.0)
         self.declare_parameter('jog_speed_mm_s', 5.0)     # gantry/{x,y,z}/move
         self.declare_parameter('jog_accel_mm_s2', 10.0)
+        # MOTORS key -> (label for messages, PumpState) for the dispensing pumps
+        self._pumps = {motor: (f'{motor} ({role})', PumpState(self._pump_config(i, motor)))
+                       for i, (motor, role) in enumerate(PUMPS.items(), start=1)}
 
         self._dry_run = self.get_parameter('dry_run').value
         self._busy = {name: False for name in MOTORS}
@@ -131,6 +149,13 @@ class SteppersNode(Node):
                 lambda req, resp, n=name: self._on_stop(req, resp, n),
                 callback_group=cb,
             )
+        for motor in PUMPS:   # their stop is the <motor>/stop service above
+            self.create_service(
+                Dispense, f'astrobiology/{motor}/dispense',
+                lambda req, resp, m=motor: self._on_dispense(req, resp, m),
+                callback_group=cb,
+            )
+        self.create_timer(1.0, self._tick_pumps)
         self.create_service(Command, 'astrobiology/gantry/home',
                             self._on_home, callback_group=cb)
         self.create_service(Command, 'astrobiology/gantry/scan',
@@ -249,10 +274,65 @@ class SteppersNode(Node):
         self._send_serial(stop_command(cmd_name))
         with self._lock:
             self._busy[service_name] = False
+            if service_name in self._pumps:
+                self._pumps[service_name][1].stop()
         self.get_logger().info(f'stop {cmd_name}')
         resp.success = True
         resp.message = f'stop {cmd_name}'
         return resp
+
+    # -- Dispensing pumps -----------------------------------------------------
+
+    def _pump_config(self, pump_id, motor):
+        for key, default in PUMP_DEFAULTS.items():
+            self.declare_parameter(f'{motor}.{key}', default)
+        value = lambda key: self.get_parameter(f'{motor}.{key}').value  # noqa: E731
+        return PumpConfig(
+            pump_id=pump_id, motor_name=MOTORS[motor][0],
+            speed_steps_s=int(value('speed_hz')), accel_steps_s2=int(value('accel_hz2')),
+            direction=value('direction'), steps_per_ml=float(value('pulses_per_ml')),
+            max_volume_ml=float(value('max_ml')),
+        )
+
+    def _on_dispense(self, req, resp, motor):
+        svc, pump = self._pumps[motor]
+        resp.expected_s = 0.0
+        with self._lock:
+            if self._busy[motor]:
+                resp.success = False
+                resp.message = f'busy: {svc} is still running'
+                return resp
+            ok, message, expected_s = pump.dispense(float(req.volume_ml), time.monotonic())
+            if not ok:
+                resp.success = False
+                resp.message = (f'volume must be more than 0 and at most '
+                                f'{pump.config.max_volume_ml:g} mL'
+                                if message == 'out of range' else message)
+                return resp
+            self._busy[motor] = True   # cleared by the ESP32's done/stopped line
+            steps = pump.commanded_steps
+
+        cfg = pump.config
+        cmd = move_command(cfg.motor_name, steps, cfg.speed_steps_s, cfg.accel_steps_s2)
+        self._send_serial(cmd)
+        resp.success = True
+        resp.message = message
+        resp.expected_s = float(expected_s)
+        self.get_logger().info(f'{svc}: {message} -> {cmd}')
+        return resp
+
+    def _tick_pumps(self):
+        # Safety net: a dispense with no done line from the ESP32 is freed after its
+        # expected time plus a margin
+        now = time.monotonic()
+        with self._lock:
+            for motor, (svc, pump) in self._pumps.items():
+                if not pump.is_busy:
+                    continue
+                pump.tick(now)
+                if not pump.is_busy:
+                    self._busy[motor] = False
+                    self.get_logger().warn(f'{svc}: no done from the ESP32 in time; marked idle')
 
     def _on_home(self, req, resp):
         resp.success = False
@@ -495,6 +575,8 @@ class SteppersNode(Node):
             return
         with self._lock:
             self._busy[svc] = False
+            if svc in self._pumps:
+                self._pumps[svc][1].complete()
 
 
 def main(args=None):

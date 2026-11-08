@@ -13,3 +13,20 @@ steppers_node:
     # gantry/{x,y,z}/move (MoveAxis, mm): jog speed and acceleration
     jog_speed_mm_s: 5.0
     jog_accel_mm_s2: 10.0
+    # Dispensing pumps (/astrobiology/<pump|flush>/dispense, volume_ml):
+    # pump = extraction (firmware p), flush = dosing (firmware f).
+    # pulses_per_ml is a PLACEHOLDER (TODO: calibrate).  Calibrate: in picocom run e.g.
+    # "g1 f 3200 800 400" into a measuring cylinder; pulses_per_ml = 3200 / mL collected.
+    # direction: cw | ccw.
+    flush:
+      pulses_per_ml: 1000.0
+      speed_hz: 800
+      accel_hz2: 400
+      direction: cw
+      max_ml: 50.0
+    pump:
+      pulses_per_ml: 1000.0
+      speed_hz: 800
+      accel_hz2: 400
+      direction: cw
+      max_ml: 50.0

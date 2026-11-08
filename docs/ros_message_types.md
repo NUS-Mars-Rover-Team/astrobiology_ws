@@ -100,11 +100,11 @@ Run a peristaltic pump for a set volume. No flow sensor: run time = volume / cal
 | **Res** | `message` | `string` | Reason if rejected |
 | **Res** | `expected_s` | `float32` | Estimated time to finish; 0 if rejected |
 
-Servers: `/astrobiology/pump1/dispense`, `/astrobiology/pump2/dispense`, `/astrobiology/pump3/dispense`
+Servers: `/astrobiology/pump/dispense` (extraction, firmware `p`), `/astrobiology/flush/dispense` (dosing, firmware `f`) (`steppers_node`; volume → pulses via the `pulses_per_ml` parameter; stop early with `pump/stop` / `flush/stop`)
 
 ```bash
-# Dispense 5 mL from pump3
-ros2 service call /astrobiology/pump3/dispense \
+# Dispense 5 mL with the dosing pump (flush)
+ros2 service call /astrobiology/flush/dispense \
   astrobiology_interfaces/srv/Dispense \
   "{volume_ml: 5.0}"
 ```

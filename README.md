@@ -246,6 +246,8 @@ while gantry homing, the scan or the handover runs. Different axes can move at t
 | `/astrobiology/pump/stop` | Trigger | Stop pump |
 | `/astrobiology/flush/move` | StepperMove | Flush pump |
 | `/astrobiology/flush/stop` | Trigger | Stop flush |
+| `/astrobiology/pump/dispense` | Dispense | Extraction pump: pump `volume_ml`, then stop (`pump/stop` ends it early) |
+| `/astrobiology/flush/dispense` | Dispense | Dosing pump: pump `volume_ml`, then stop (`flush/stop` ends it early) |
 | `/astrobiology/centrifuge/move` | StepperMove | Centrifuge motor |
 | `/astrobiology/centrifuge/stop` | Trigger | Stop centrifuge |
 | `/astrobiology/gantry/x/move` | MoveAxis | Gantry X axis, mm, relative or absolute |
@@ -270,6 +272,28 @@ while gantry homing, the scan or the handover runs. Different axes can move at t
 | `/raman/stop` | Trigger | Stop scanning (the scan in progress is abandoned) |
 | `/raman/set_dark` | Trigger | Use the latest raw scan as the dark (take it with the laser off) |
 | `/raman/clear_dark` | Trigger | Stop subtracting the dark |
+
+### Dispensing pumps (volume)
+
+`steppers_node` runs the two peristaltic pumps by volume: `pump` (firmware `p`) is the
+**extraction pump**, `flush` (firmware `f`) is the **dosing pump**.
+
+```bash
+ros2 service call /astrobiology/flush/dispense astrobiology_interfaces/srv/Dispense "{volume_ml: 5.0}"   # dosing
+ros2 service call /astrobiology/flush/stop std_srvs/srv/Trigger
+ros2 service call /astrobiology/pump/dispense astrobiology_interfaces/srv/Dispense "{volume_ml: 5.0}"    # extraction
+```
+
+- The reply comes at once (`dispensing 5.00 ml (5000 steps)`, `expected_s`); the pump stops by
+  itself after the volume. A second dispense on the same pump is refused (`busy`) until the
+  ESP32 reports `done`, as is a dispense while a raw `pump/move` / `flush/move` runs.
+- Volumes must be more than 0 and at most `max_ml` (50 mL).
+- Settings per pump in `config/steppers.yaml` (`pump.*`, `flush.*`):
+  `pulses_per_ml`, `speed_hz` (800), `accel_hz2` (400), `direction` (`cw`/`ccw`), `max_ml`.
+- **`pulses_per_ml` is a placeholder (1000) until calibrated.** In picocom run e.g.
+  `g1 f 3200 800 400` into a measuring cylinder; `pulses_per_ml` = 3200 / mL collected.
+  Repeat for `p`.
+- If no `done` arrives, the pump is freed after its expected time plus 2 s, with a warning.
 
 ### Gantry position topic
 

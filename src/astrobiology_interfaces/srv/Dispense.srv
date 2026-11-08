@@ -1,7 +1,6 @@
 # Run a peristaltic pump for a set volume. No flow sensor: run time = volume / calibrated flow rate.
-# Servers: /astrobiology/pump1/dispense (water into cache),
-#          /astrobiology/pump2/dispense (slurry into carousel),
-#          /astrobiology/pump3/dispense
+# Servers: /astrobiology/pump/dispense (extraction, firmware p),
+#          /astrobiology/flush/dispense (dosing, firmware f)  [steppers_node]
 
 float32 volume_ml
 ---

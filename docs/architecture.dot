@@ -111,6 +111,14 @@ digraph astrobiology {
             label="/astrobiology/\npump/move\n[StepperMove]"
             shape=hexagon style=filled fillcolor="#E1BEE7"
         ];
+        pump_dispense [
+            label="/astrobiology/\npump/dispense\n[Dispense]\n(extraction)"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        flush_dispense [
+            label="/astrobiology/\nflush/dispense\n[Dispense]\n(dosing)"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
         pump_stop [
             label="/astrobiology/\npump/stop\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
@@ -250,6 +258,8 @@ digraph astrobiology {
     steppers_node -> pump_stop       [label="server" color="#6A1B9A"];
     steppers_node -> flush_move      [label="server" color="#6A1B9A"];
     steppers_node -> flush_stop      [label="server" color="#6A1B9A"];
+    steppers_node -> pump_dispense [label="server" color="#6A1B9A"];
+    steppers_node -> flush_dispense [label="server" color="#6A1B9A"];
     steppers_node -> centrifuge_move [label="server" color="#6A1B9A"];
     steppers_node -> centrifuge_stop [label="server" color="#6A1B9A"];
     steppers_node -> gantry_x_move   [label="server" color="#6A1B9A"];
