@@ -186,6 +186,7 @@ to the stepper ESP32 directly, so stop `steppers_node` first.
 ```bash
 ros2 service call /astrobiology/gantry/home astrobiology_interfaces/srv/Command
 ros2 service call /astrobiology/gantry/scan astrobiology_interfaces/srv/Command
+ros2 service call /astrobiology/gantry/handover astrobiology_interfaces/srv/Command
 ros2 service call /astrobiology/gantry/stop std_srvs/srv/Trigger
 ```
 
@@ -244,7 +245,8 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/drill/stop` | Trigger | Stop the drill (`s`) |
 | `/astrobiology/gantry/home` | Command | Home the gantry, Z then Y then X (`steppers_node`); replies at once |
 | `/astrobiology/gantry/scan` | Command | Start the gantry grid scan (`steppers_node`); replies at once |
-| `/astrobiology/gantry/stop` | Trigger | Stop the gantry scan or homing (decelerates X/Y/Z) |
+| `/astrobiology/gantry/handover` | Command | Cache handover: home all, X to 53, Y to 105, home Y, home X (`steppers_node`); replies at once |
+| `/astrobiology/gantry/stop` | Trigger | Stop gantry homing, the scan or the handover (decelerates X/Y/Z) |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
 

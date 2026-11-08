@@ -5,8 +5,9 @@ which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
 
 It also runs gantry jobs in the background, sharing this node's serial port:
 /astrobiology/gantry/home homes Z, Y, X; /astrobiology/gantry/scan runs the
-grid scan (gantry_scan.py); /astrobiology/gantry/stop ends either.  Gantry
-move services are rejected while a job runs.
+grid scan (gantry_scan.py); /astrobiology/gantry/handover runs the cache
+handover (home, X out, Y out, home Y, home X); /astrobiology/gantry/stop ends
+any of them.  Gantry move services are rejected while a job runs.
 
 /astrobiology/gantry/position (geometry_msgs/Point, mm) publishes the gantry
 X/Y/Z from every position the ESP32 reports; the node asks for it with 'pos'
@@ -70,6 +71,8 @@ class SteppersNode(Node):
         self.declare_parameter('scan_config', '')       # '' = installed gantry_scan.yaml
         self.declare_parameter('scan_dir', '~/scans')   # where scan CSVs are written
         self.declare_parameter('position_rate_hz', 2.0)   # 0 = don't poll 'pos'
+        self.declare_parameter('handover_x_mm', 53.0)     # cache handover position
+        self.declare_parameter('handover_y_mm', 105.0)
 
         self._dry_run = self.get_parameter('dry_run').value
         self._busy = {name: False for name in MOTORS}
@@ -115,6 +118,8 @@ class SteppersNode(Node):
                             self._on_home, callback_group=cb)
         self.create_service(Command, 'astrobiology/gantry/scan',
                             self._on_scan, callback_group=cb)
+        self.create_service(Command, 'astrobiology/gantry/handover',
+                            self._on_handover, callback_group=cb)
         self.create_service(Trigger, 'astrobiology/gantry/stop',
                             self._on_gantry_stop, callback_group=cb)
 
@@ -219,11 +224,31 @@ class SteppersNode(Node):
                                f'(~{resp.expected_s:.0f} s plus homing)')
         return resp
 
+    def _on_handover(self, req, resp):
+        resp.success = False
+        resp.expected_s = 0.0
+        x = float(self.get_parameter('handover_x_mm').value)
+        y = float(self.get_parameter('handover_y_mm').value)
+        if x < 0 or y < 0:
+            resp.message = f'handover position x={x:g}, y={y:g} is behind the endstops'
+            return resp
+        if not self._start_gantry_job('handover', self._handover, (x, y), resp):
+            return resp
+        try:   # the scan config's travel limits bound the first homing
+            cfg = gs.ScanConfig.from_yaml(self._scan_config_path())
+            resp.expected_s = float(gs.estimate_handover_s(cfg, x, y))
+        except (gs.ScanConfigError, OSError, yaml.YAMLError):
+            pass
+        resp.success = True
+        resp.message = f'cache handover: home, X to {x:g}, Y to {y:g}, home Y, home X'
+        self.get_logger().info(f'{resp.message} (up to ~{resp.expected_s:.0f} s)')
+        return resp
+
     def _on_gantry_stop(self, req, resp):
         job = self._gantry_job
         if job is None:
             resp.success = False
-            resp.message = 'no gantry scan or homing in progress'
+            resp.message = 'no gantry job (homing, scan, handover) in progress'
             return resp
         self._gantry_stop.set()
         for axis in 'xyz':
@@ -268,7 +293,8 @@ class SteppersNode(Node):
         except gs.GantryError as e:
             if self._gantry_stop.is_set():
                 log.warn(f'gantry {job} stopped on request'
-                         + ('; position not set, home again' if job == 'homing' else ''))
+                         + ('; position not set, home again' if job in ('homing', 'handover')
+                            else ''))
             else:
                 log.error(f'gantry {job} failed: {e}')
                 if gantry is not None:
@@ -286,6 +312,11 @@ class SteppersNode(Node):
         if self._gantry_stop.is_set():
             raise gs.GantryError('homing stopped')
         self.get_logger().info('gantry homed: X/Y/Z = 0')
+
+    def _handover(self, gantry, x, y):
+        gs.run_handover(gantry, x, y, log=self.get_logger().info,
+                        stop=self._gantry_stop.is_set)
+        self.get_logger().info('cache handover done: X/Y/Z = 0')
 
     def _scan(self, gantry, cfg, points, out):
         log = self.get_logger()

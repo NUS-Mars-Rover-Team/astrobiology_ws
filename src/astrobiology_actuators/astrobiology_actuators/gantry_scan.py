@@ -592,6 +592,41 @@ def estimate_home_s(cfg):
     return sum(cfg.travel_max[axis] / HOME_FAST_MM_S + HOME_TOUCH_S for axis in 'xyz')
 
 
+def _check_stop(stop):
+    if stop is not None and stop():
+        raise GantryError('stopped')
+
+
+def run_handover(gantry, x, y, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2,
+                 log=print, stop=None):
+    """Cache handover: home everything, X to x, Y to y, then home Y, then home X.
+
+    Z is at 0 (clear) throughout, since homing ends there.  stop() is checked
+    before each step and at the end; once it returns True this raises
+    GantryError('stopped').  A stop during homing still ends with the
+    firmware's 'done g28', so the check after the last step matters.
+    """
+    steps = (
+        ('homing all axes (Z, Y, X)', lambda: gantry.home()),
+        (f'X to {x:g} mm', lambda: gantry.move_to({'x': x}, speed, accel)),
+        (f'Y to {y:g} mm', lambda: gantry.move_to({'y': y}, speed, accel)),
+        ('homing Y', lambda: gantry.home(('y',))),
+        ('homing X', lambda: gantry.home(('x',))),
+    )
+    for label, step in steps:
+        _check_stop(stop)
+        log(f'cache handover: {label}')
+        step()
+    _check_stop(stop)
+
+
+def estimate_handover_s(cfg, x, y, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2):
+    """Rough handover duration: homing (upper bound), the two moves, the two re-homes."""
+    moves = (x + y) / speed + 2 * speed / accel
+    rehome = (x + y) / HOME_FAST_MM_S + 2 * HOME_TOUCH_S
+    return estimate_home_s(cfg) + moves + rehome
+
+
 def prepare_scan(path):
     """Load and validate a config for a live scan: (cfg, points).
 

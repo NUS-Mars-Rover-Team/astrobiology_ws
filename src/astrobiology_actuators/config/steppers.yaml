@@ -6,3 +6,7 @@ steppers_node:
     baud: 115200
     dry_run: false
     motor_name: pump
+    # Cache handover (/astrobiology/gantry/handover): after homing, X then Y go here (mm),
+    # then Y and X home again.  Y 105 is beyond the scan's travel_max; it's the handover spot.
+    handover_x_mm: 53.0
+    handover_y_mm: 105.0

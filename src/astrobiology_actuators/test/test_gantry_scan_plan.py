@@ -168,8 +168,9 @@ class FakeGantry:
         self.pos_error = pos_error
 
     def home(self, axes=()):
-        self.calls.append(('home',))
-        self.position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        self.calls.append(('home',) + tuple(axes))
+        for axis in axes or 'xyz':
+            self.position[axis] = 0.0
 
     def move_to(self, target, speed, accel):
         assert not ('z' in target and len(target) > 1), 'Z moved with XY'
@@ -421,3 +422,25 @@ def test_estimate_home_s_is_search_plus_touch_per_axis():
     cfg = make_cfg()   # travel_max 100, 100, 50 mm
     expected = (100 + 100 + 50) / gantry_scan.HOME_FAST_MM_S + 3 * gantry_scan.HOME_TOUCH_S
     assert gantry_scan.estimate_home_s(cfg) == pytest.approx(expected)
+
+
+def test_handover_sequence():
+    gantry = FakeGantry()
+    gantry.position = {'x': 7.0, 'y': 3.0, 'z': 2.0}
+    gantry_scan.run_handover(gantry, 53.0, 105.0, log=lambda m: None)
+    assert gantry.calls == [
+        ('home',),
+        ('move', {'x': 53.0}),
+        ('move', {'y': 105.0}),
+        ('home', 'y'),
+        ('home', 'x'),
+    ]
+    assert gantry.position == {'x': 0.0, 'y': 0.0, 'z': 0.0}
+
+
+def test_handover_stops_between_steps():
+    gantry = FakeGantry()
+    with pytest.raises(gantry_scan.GantryError, match='stopped'):
+        gantry_scan.run_handover(gantry, 53.0, 105.0, log=lambda m: None,
+                                 stop=lambda: len(gantry.calls) >= 2)
+    assert gantry.calls == [('home',), ('move', {'x': 53.0})]
