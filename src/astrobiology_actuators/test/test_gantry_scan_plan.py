@@ -427,7 +427,8 @@ def test_estimate_home_s_is_search_plus_touch_per_axis():
 def test_handover_sequence():
     gantry = FakeGantry()
     gantry.position = {'x': 7.0, 'y': 3.0, 'z': 2.0}
-    gantry_scan.run_handover(gantry, 53.0, 105.0, log=lambda m: None)
+    gantry_scan.run_sequence(gantry, 'cache handover', gantry_scan.handover_steps(53.0, 105.0),
+                             log=lambda m: None)
     assert gantry.calls == [
         ('home',),
         ('move', {'x': 53.0}),
@@ -438,9 +439,48 @@ def test_handover_sequence():
     assert gantry.position == {'x': 0.0, 'y': 0.0, 'z': 0.0}
 
 
-def test_handover_stops_between_steps():
+def test_lid_sequence():
+    gantry = FakeGantry()
+    gantry_scan.run_sequence(gantry, 'lidding', gantry_scan.lid_steps(160.0, 6.0),
+                             log=lambda m: None)
+    assert gantry.calls == [
+        ('home',), ('move', {'x': 160.0}), ('move', {'y': 6.0}), ('home', 'x'), ('home', 'y'),
+    ]
+
+
+def test_unlid_sequence():
+    gantry = FakeGantry()
+    gantry_scan.run_sequence(gantry, 'unlidding', gantry_scan.unlid_steps(160.0, 0.0),
+                             log=lambda m: None)
+    assert gantry.calls == [
+        ('home',), ('move', {'x': 160.0}), ('move', {'y': 0.0}), ('home', 'x'),
+    ]
+
+
+def test_sequence_logs_each_step():
+    lines = []
+    gantry_scan.run_sequence(FakeGantry(), 'lidding', gantry_scan.lid_steps(160.0, 6.0),
+                             log=lines.append)
+    assert lines == ['lidding: home all', 'lidding: X to 160 mm', 'lidding: Y to 6 mm',
+                     'lidding: home X', 'lidding: home Y']
+    assert (gantry_scan.describe_steps(gantry_scan.unlid_steps(160.0, 0.0))
+            == 'home all, X to 160 mm, Y to 0 mm, home X')
+
+
+def test_sequence_stops_between_steps():
     gantry = FakeGantry()
     with pytest.raises(gantry_scan.GantryError, match='stopped'):
-        gantry_scan.run_handover(gantry, 53.0, 105.0, log=lambda m: None,
-                                 stop=lambda: len(gantry.calls) >= 2)
+        gantry_scan.run_sequence(gantry, 'cache handover', gantry_scan.handover_steps(53.0, 105.0),
+                                 log=lambda m: None, stop=lambda: len(gantry.calls) >= 2)
     assert gantry.calls == [('home',), ('move', {'x': 53.0})]
+
+
+def test_estimate_sequence_s():
+    cfg = make_cfg()
+    v, a = gantry_scan.DEFAULT_SPEED_MM_S, gantry_scan.DEFAULT_ACCEL_MM_S2
+    expected = (gantry_scan.estimate_home_s(cfg)
+                + 160 / v + v / a + 6 / v + v / a                        # X out, Y out
+                + 160 / gantry_scan.HOME_FAST_MM_S + gantry_scan.HOME_TOUCH_S   # home X
+                + 6 / gantry_scan.HOME_FAST_MM_S + gantry_scan.HOME_TOUCH_S)    # home Y
+    assert gantry_scan.estimate_sequence_s(cfg, gantry_scan.lid_steps(160.0, 6.0)) \
+        == pytest.approx(expected)

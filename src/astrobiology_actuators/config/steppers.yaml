@@ -10,6 +10,13 @@ steppers_node:
     # then Y and X home again.  Y 105 is beyond the scan's travel_max; it's the handover spot.
     handover_x_mm: 53.0
     handover_y_mm: 105.0
+    # Dock lid (/astrobiology/gantry/lid): home all, X then Y go here (mm), then home X, home Y.
+    # Undock lid (/astrobiology/gantry/unlid): home all, X then Y go here, then home X.
+    # X 160 is beyond the scan's travel_max; it's the lid dock.
+    lid_x_mm: 160.0
+    lid_y_mm: 6.0
+    unlid_x_mm: 160.0
+    unlid_y_mm: 0.0
     # gantry/{x,y,z}/move (MoveAxis, mm): jog speed and acceleration
     jog_speed_mm_s: 5.0
     jog_accel_mm_s2: 10.0

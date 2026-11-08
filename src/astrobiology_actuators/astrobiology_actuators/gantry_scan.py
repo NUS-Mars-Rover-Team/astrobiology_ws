@@ -597,34 +597,77 @@ def _check_stop(stop):
         raise GantryError('stopped')
 
 
-def run_handover(gantry, x, y, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2,
-                 log=print, stop=None):
-    """Cache handover: home everything, X to x, Y to y, then home Y, then home X.
+# Gantry sequences (cache handover, lidding, unlidding) are lists of steps:
+#   ('home', ())         home every axis (firmware order Z, Y, X)
+#   ('home', ('y',))     home only the listed axes
+#   ('move', {'x': 53})  absolute move of one axis
+# Each starts by homing everything, so Z is at 0 (clear) throughout.
 
-    Z is at 0 (clear) throughout, since homing ends there.  stop() is checked
-    before each step and at the end; once it returns True this raises
-    GantryError('stopped').  A stop during homing still ends with the
+def handover_steps(x, y):
+    """Cache handover: home everything, X to x, Y to y, then home Y, then home X."""
+    return [('home', ()), ('move', {'x': x}), ('move', {'y': y}),
+            ('home', ('y',)), ('home', ('x',))]
+
+
+def lid_steps(x, y):
+    """Dock lidding: home everything, X to x, Y to y, then home X, then home Y."""
+    return [('home', ()), ('move', {'x': x}), ('move', {'y': y}),
+            ('home', ('x',)), ('home', ('y',))]
+
+
+def unlid_steps(x, y):
+    """Dock unlidding: home everything, X to x, Y to y, then home X."""
+    return [('home', ()), ('move', {'x': x}), ('move', {'y': y}), ('home', ('x',))]
+
+
+def step_label(step):
+    kind, arg = step
+    if kind == 'home':
+        return 'home ' + (' '.join(a.upper() for a in arg) if arg else 'all')
+    return ', '.join(f'{axis.upper()} to {mm:g} mm' for axis, mm in arg.items())
+
+
+def describe_steps(steps):
+    return ', '.join(step_label(step) for step in steps)
+
+
+def run_sequence(gantry, name, steps, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2,
+                 log=print, stop=None):
+    """Run the steps in order, logging '<name>: <step>' before each.
+
+    stop() is checked before each step and at the end; once it returns True this
+    raises GantryError('stopped').  A stop during homing still ends with the
     firmware's 'done g28', so the check after the last step matters.
     """
-    steps = (
-        ('homing all axes (Z, Y, X)', lambda: gantry.home()),
-        (f'X to {x:g} mm', lambda: gantry.move_to({'x': x}, speed, accel)),
-        (f'Y to {y:g} mm', lambda: gantry.move_to({'y': y}, speed, accel)),
-        ('homing Y', lambda: gantry.home(('y',))),
-        ('homing X', lambda: gantry.home(('x',))),
-    )
-    for label, step in steps:
+    for step in steps:
         _check_stop(stop)
-        log(f'cache handover: {label}')
-        step()
+        log(f'{name}: {step_label(step)}')
+        kind, arg = step
+        if kind == 'home':
+            gantry.home(arg)
+        else:
+            gantry.move_to(arg, speed, accel)
     _check_stop(stop)
 
 
-def estimate_handover_s(cfg, x, y, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2):
-    """Rough handover duration: homing (upper bound), the two moves, the two re-homes."""
-    moves = (x + y) / speed + 2 * speed / accel
-    rehome = (x + y) / HOME_FAST_MM_S + 2 * HOME_TOUCH_S
-    return estimate_home_s(cfg) + moves + rehome
+def estimate_sequence_s(cfg, steps, speed=DEFAULT_SPEED_MM_S, accel=DEFAULT_ACCEL_MM_S2):
+    """Rough duration: homing all (upper bound from travel_max), moves, partial re-homes."""
+    total = 0.0
+    here = dict(HOME)
+    for kind, arg in steps:
+        if kind == 'home' and not arg:
+            total += estimate_home_s(cfg)
+            here = dict(HOME)
+        elif kind == 'home':
+            for axis in arg:
+                total += here[axis] / HOME_FAST_MM_S + HOME_TOUCH_S
+                here[axis] = 0.0
+        else:
+            dist = max(abs(mm - here[axis]) for axis, mm in arg.items())
+            if dist >= HALF_STEP_MM:
+                total += dist / speed + speed / accel
+            here.update(arg)
+    return total
 
 
 def prepare_scan(path):
