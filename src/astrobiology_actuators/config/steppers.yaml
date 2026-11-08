@@ -1,5 +1,6 @@
 # Stepper node parameters (all six ESP32 stepper channels).
-# Steps, speed, and accel come from the StepperMove service request.
+# StepperMove (pump/flush/centrifuge move) passes distance, speed, accel in the firmware's
+# units for that motor: pump/flush pulses, centrifuge revolutions / RPM / RPM/s.
 steppers_node:
   ros__parameters:
     port: /dev/esp_steppers
@@ -37,3 +38,14 @@ steppers_node:
       accel_hz2: 400
       direction: cw
       max_ml: 50.0
+    # Centrifuge (/astrobiology/centrifuge/spin: rpm for duration_s) on firmware motor c
+    centrifuge:
+      accel_rpm_s: 100.0     # ramp up and down
+      max_rpm: 3000.0        # spin requests above this are refused (firmware limit 3750)
+    # Carousel (/astrobiology/carousel/rotate: step_deg CW/CCW), the same motor c
+    carousel:
+      allowed_steps_deg: [1.0, 5.0, 60.0]
+      speed_rpm: 10.0
+      accel_rpm_s: 20.0
+      gear_ratio: 1.0        # motor revolutions per carousel revolution
+      cw_positive: true      # false if CW turns the carousel the wrong way

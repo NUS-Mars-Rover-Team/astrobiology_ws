@@ -1,7 +1,8 @@
-# Run the carousel/centrifuge hybrid as a centrifuge. Stops on its own when the duration is up.
-# Server: /astrobiology/centrifuge/spin. Rejected unless in centrifuge mode.
+# Run the carousel/centrifuge hybrid as a centrifuge at rpm for duration_s, then stop on its own.
+# Server: /astrobiology/centrifuge/spin (steppers_node).  Stop early: /astrobiology/centrifuge/stop.
 
-float32 duration_s      # ConOps: 300 s
+float32 duration_s      # time at full speed (ConOps: 300 s); ramps add rpm / accel on top
+float32 rpm             # > 0, at most the node's centrifuge.max_rpm
 ---
 bool    success         # accepted, not finished
 string  message         # reason if rejected

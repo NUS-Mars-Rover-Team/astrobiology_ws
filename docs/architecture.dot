@@ -94,6 +94,10 @@ digraph astrobiology {
             label="/raman/\nspectrum\n[RamanSpectrum]"
             shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
         ];
+        carousel_angle_topic [
+            label="/astrobiology/carousel/\nangle\n[Float32, deg]"
+            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
+        ];
         gantry_position_topic [
             label="/astrobiology/gantry/\nposition\n[Point, mm]"
             shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
@@ -133,6 +137,18 @@ digraph astrobiology {
         ];
         centrifuge_move [
             label="/astrobiology/\ncentrifuge/move\n[StepperMove]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        centrifuge_spin [
+            label="/astrobiology/\ncentrifuge/spin\n[Spin]"
+            shape=hexagon style=filled fillcolor="#E1BEE7"
+        ];
+        carousel_home [
+            label="/astrobiology/\ncarousel/home\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+        carousel_rotate [
+            label="/astrobiology/\ncarousel/rotate\n[Rotate]"
             shape=hexagon style=filled fillcolor="#E1BEE7"
         ];
         centrifuge_stop [
@@ -270,6 +286,10 @@ digraph astrobiology {
     steppers_node -> flush_dispense [label="server" color="#6A1B9A"];
     steppers_node -> centrifuge_move [label="server" color="#6A1B9A"];
     steppers_node -> centrifuge_stop [label="server" color="#6A1B9A"];
+    steppers_node -> centrifuge_spin [label="server" color="#6A1B9A"];
+    steppers_node -> carousel_rotate [label="server" color="#6A1B9A"];
+    steppers_node -> carousel_home [label="server" color="#6A1B9A"];
+    steppers_node -> carousel_angle_topic [label="pub" color="#2E7D32"];
     steppers_node -> gantry_x_move   [label="server" color="#6A1B9A"];
     steppers_node -> gantry_x_stop   [label="server" color="#6A1B9A"];
     steppers_node -> gantry_y_move   [label="server" color="#6A1B9A"];

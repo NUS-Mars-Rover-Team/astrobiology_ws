@@ -69,15 +69,15 @@ ros2 topic echo /astrobiology/motor_status astrobiology_msgs/msg/MotorStatus
 
 ### `StepperMove.srv`
 
-Move a stepper motor. Maps directly to `g1 <motor> <steps> <speed_hz> <accel_hz2>`. Used by all stepper actuators (pumps, centrifuge, flush, gantry axes).
+Move a stepper motor by a relative amount. Sent unchanged as `g1 <motor> <distance> <speed> <accel>`, so the units are the firmware's for that motor: pump/flush in pulses, pulses/s, pulses/s²; centrifuge in revolutions, RPM, RPM/s.
 
 | | Field | Type | Description |
 |---|-------|------|-------------|
-| **Req** | `steps` | `int32` | Signed step count (+forward, -reverse) |
-| **Req** | `speed_hz` | `int32` | Pulses/sec (1..50000) |
-| **Req** | `accel_hz2` | `int32` | Pulses/sec² (1..1000000) |
-| **Res** | `success` | `bool` | Whether accepted |
-| **Res** | `message` | `string` | Error reason if failed |
+| **Req** | `distance` | `float32` | Signed (negative = reverse); fractions allowed, e.g. 0.25 rev |
+| **Req** | `speed` | `float32` | > 0 |
+| **Req** | `accel` | `float32` | > 0 |
+| **Res** | `success` | `bool` | Sent to the ESP32 |
+| **Res** | `message` | `string` | The `g1` command sent, or why it was rejected |
 
 Servers: `/astrobiology/pump/move`, `/astrobiology/flush/move`, `/astrobiology/centrifuge/move` (the gantry axes use `MoveAxis`)
 
@@ -85,7 +85,12 @@ Servers: `/astrobiology/pump/move`, `/astrobiology/flush/move`, `/astrobiology/c
 # Pump forward 3200 steps
 ros2 service call /astrobiology/pump/move \
   astrobiology_interfaces/srv/StepperMove \
-  "{steps: 3200, speed_hz: 800, accel_hz2: 400}"
+  "{distance: 3200, speed: 800, accel: 400}"
+
+# Centrifuge motor a quarter turn at 10 RPM
+ros2 service call /astrobiology/centrifuge/move \
+  astrobiology_interfaces/srv/StepperMove \
+  "{distance: 0.25, speed: 10, accel: 20}"
 
 ```
 
@@ -156,39 +161,40 @@ ros2 service call /astrobiology/gantry/home \
 
 ### `Spin.srv`
 
-Run the carousel/centrifuge hybrid as a centrifuge. Rejected unless in centrifuge mode.
+Run the carousel/centrifuge hybrid as a centrifuge at `rpm` for `duration_s`, then stop on its own. Stop early with `/astrobiology/centrifuge/stop`.
 
 | | Field | Type | Description |
 |---|-------|------|-------------|
-| **Req** | `duration_s` | `float32` | How long to spin (ConOps: 300 s) |
+| **Req** | `duration_s` | `float32` | Time at full speed (ConOps: 300 s); ramps add `rpm / accel` |
+| **Req** | `rpm` | `float32` | > 0, at most `centrifuge.max_rpm` (3000) |
 | **Res** | `success` | `bool` | Accepted (not finished) |
 | **Res** | `message` | `string` | Reason if rejected |
 | **Res** | `expected_s` | `float32` | Estimated time to finish; 0 if rejected |
 
-Server: `/astrobiology/centrifuge/spin`
+Server: `/astrobiology/centrifuge/spin` (`steppers_node`; sends `g1 c <rpm × duration_s / 60> <rpm> <accel>`)
 
 ```bash
-# Centrifuge for 300 seconds
+# Centrifuge at 1300 RPM for 300 seconds
 ros2 service call /astrobiology/centrifuge/spin \
   astrobiology_interfaces/srv/Spin \
-  "{duration_s: 300.0}"
+  "{rpm: 1300.0, duration_s: 300.0}"
 ```
 
 ### `Rotate.srv`
 
-Step the carousel to bring a cuvette into view. Rejected unless in carousel mode.
+Step the carousel to bring a cuvette into view. Steps are rounded to whole motor steps with the remainder carried over, so repeated steps don't drift.
 
 | | Field | Type | Description |
 |---|-------|------|-------------|
 | **Req** | `DIRECTION_CW` | `uint8` = 0 | Constant: clockwise |
 | **Req** | `DIRECTION_CCW` | `uint8` = 1 | Constant: counter-clockwise |
-| **Req** | `step_deg` | `float32` | Step angle (must be 5 or 60 from config) |
+| **Req** | `step_deg` | `float32` | Step angle, one of `carousel.allowed_steps_deg` (1, 5, 60) |
 | **Req** | `direction` | `uint8` | CW or CCW |
 | **Res** | `success` | `bool` | Accepted (not finished) |
 | **Res** | `message` | `string` | Reason if rejected |
 | **Res** | `expected_s` | `float32` | Estimated time to finish; 0 if rejected |
 
-Server: `/astrobiology/carousel/rotate`
+Server: `/astrobiology/carousel/rotate` (`steppers_node`, firmware motor `c`)
 
 ```bash
 # Rotate carousel 60 degrees clockwise
@@ -269,7 +275,7 @@ No request fields. Used for stop commands and spectro zero-reference.
 | **Res** | `success` | `bool` | Whether it succeeded |
 | **Res** | `message` | `string` | Informational |
 
-Servers: `/astrobiology/pump/stop`, `/astrobiology/flush/stop`, `/astrobiology/centrifuge/stop`, `/astrobiology/gantry/x/stop`, `/astrobiology/gantry/y/stop`, `/astrobiology/gantry/z/stop`, `/astrobiology/gantry/stop`, `/spectro/.../set_zero_reference`, `/spectro/.../clear_zero_reference`
+Servers: `/astrobiology/pump/stop`, `/astrobiology/flush/stop`, `/astrobiology/centrifuge/stop`, `/astrobiology/carousel/home`, `/astrobiology/gantry/x/stop`, `/astrobiology/gantry/y/stop`, `/astrobiology/gantry/z/stop`, `/astrobiology/gantry/stop`, `/spectro/.../set_zero_reference`, `/spectro/.../clear_zero_reference`
 
 ```bash
 # Stop the pump

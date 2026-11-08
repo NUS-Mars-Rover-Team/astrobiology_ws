@@ -212,17 +212,19 @@ Full guide (commands, config, coordinate model, viewing the pictures, troublesho
 
 ### Stepper motor control
 
-Pump, flush and centrifuge use the `StepperMove` service (`steps`, `speed_hz`, `accel_hz2`),
-passed to the firmware unchanged. The gantry axes use `MoveAxis` in mm (below).
-
-> **Known issue:** the current firmware reads the centrifuge in rev, RPM and RPM/s, so
-> `centrifuge/move` moves by the wrong amount (`steps: 1600` = 1600 turns). Use picocom
-> (`g1 c <rev> <RPM> <RPM/s>`) for now. Pump and flush are raw pulses and unaffected.
+Pump, flush and centrifuge use the `StepperMove` service (`distance`, `speed`, `accel`, all
+`float32`), sent to the firmware unchanged as `g1 <motor> <distance> <speed> <accel>`, so the
+units are the firmware's for that motor: **pump/flush in pulses, pulses/s, pulses/s²;
+centrifuge in revolutions, RPM, RPM/s**. The gantry axes use `MoveAxis` in mm (below).
 
 ```bash
-# Move pump 3200 steps forward at 800 steps/s, 400 steps/s² accel
+# Move pump 3200 pulses forward at 800 pulses/s, 400 pulses/s² accel
 ros2 service call /astrobiology/pump/move \
-  astrobiology_interfaces/srv/StepperMove "{steps: 3200, speed_hz: 800, accel_hz2: 400}"
+  astrobiology_interfaces/srv/StepperMove "{distance: 3200, speed: 800, accel: 400}"
+
+# Turn the centrifuge motor a quarter turn at 10 RPM
+ros2 service call /astrobiology/centrifuge/move \
+  astrobiology_interfaces/srv/StepperMove "{distance: 0.25, speed: 10, accel: 20}"
 
 # Gantry: jog X by +0.5 mm, or go to X = 28 mm (MoveAxis, mm)
 ros2 service call /astrobiology/gantry/x/move \
@@ -250,8 +252,11 @@ while gantry homing, the scan or the handover runs. Different axes can move at t
 | `/astrobiology/flush/stop` | Trigger | Stop flush |
 | `/astrobiology/pump/dispense` | Dispense | Extraction pump: pump `volume_ml`, then stop (`pump/stop` ends it early) |
 | `/astrobiology/flush/dispense` | Dispense | Dosing pump: pump `volume_ml`, then stop (`flush/stop` ends it early) |
-| `/astrobiology/centrifuge/move` | StepperMove | Centrifuge motor |
-| `/astrobiology/centrifuge/stop` | Trigger | Stop centrifuge |
+| `/astrobiology/centrifuge/move` | StepperMove | Centrifuge motor (revolutions, RPM, RPM/s) |
+| `/astrobiology/centrifuge/stop` | Trigger | Stop centrifuge (ends a spin or carousel step) |
+| `/astrobiology/centrifuge/spin` | Spin | Spin at `rpm` for `duration_s`, then stop |
+| `/astrobiology/carousel/rotate` | Rotate | Step the carousel `step_deg` (1, 5, 60) CW or CCW |
+| `/astrobiology/carousel/home` | Trigger | Make the current carousel angle 0 (the cuvette at the camera); starts `/astrobiology/carousel/angle` |
 | `/astrobiology/gantry/x/move` | MoveAxis | Gantry X axis, mm, relative or absolute |
 | `/astrobiology/gantry/x/stop` | Trigger | Stop X axis |
 | `/astrobiology/gantry/y/move` | MoveAxis | Gantry Y axis, mm, relative or absolute |
@@ -298,6 +303,45 @@ ros2 service call /astrobiology/pump/dispense astrobiology_interfaces/srv/Dispen
   `g1 f 3200 800 400` into a measuring cylinder; `pulses_per_ml` = 3200 / mL collected.
   Repeat for `p`.
 - If no `done` arrives, the pump is freed after its expected time plus 2 s, with a warning.
+
+### Centrifuge and carousel
+
+The centrifuge and the carousel are the same motor (firmware `c`, 1600 steps per motor
+revolution).
+
+```bash
+# Centrifuge at 1300 RPM for 5 min (-> g1 c 6500 1300 100), then it stops by itself
+ros2 service call /astrobiology/centrifuge/spin astrobiology_interfaces/srv/Spin "{rpm: 1300, duration_s: 300}"
+ros2 service call /astrobiology/centrifuge/stop std_srvs/srv/Trigger     # stop early (decelerates)
+
+# Carousel 60 degrees clockwise (direction 0 = CW, 1 = CCW)
+ros2 service call /astrobiology/carousel/rotate astrobiology_interfaces/srv/Rotate "{step_deg: 60, direction: 0}"
+```
+
+- Spin: revolutions = `rpm` × `duration_s` / 60, ramped at `centrifuge.accel_rpm_s` (100);
+  `expected_s` adds the ramps. Refused above `centrifuge.max_rpm` (3000; the firmware's own
+  limit is 3750) or while the motor is busy.
+- Rotate: `step_deg` must be one of `carousel.allowed_steps_deg` (1, 5, 60). Each step is
+  rounded to whole motor steps with the remainder carried into the next, so six 60° steps are
+  exactly one turn (267 + 266 + 267 + 267 + 266 + 267 = 1600 steps). Runs at
+  `carousel.speed_rpm` (10). Set `carousel.gear_ratio` (motor revolutions per carousel
+  revolution) if the carousel is geared, and `carousel.cw_positive: false` if CW turns the
+  wrong way.
+- The carousel angle isn't measured by a sensor, only counted from the motor steps.
+  To give it a reference, turn cuvette 1 to the camera (carousel camera, ±° steps) and call
+  `/astrobiology/carousel/home`. It sends the firmware's `zero c` (refused while the motor
+  moves). From then on `steppers_node` publishes **`/astrobiology/carousel/angle`**
+  (`std_msgs/Float32`, degrees clockwise from the camera, 0–360) from the `C:` field of the
+  ESP32's `pos` replies (2 Hz) and each `done c` line.
+- The angle stops being published, with a warning, after an estop (`!`, `estop c`: the driver
+  is switched off and the wheel can coast) or an ESP32 restart (the count goes back to 0).
+  Call `carousel/home` again. Skipped steps (overload) aren't detected, so check the camera
+  after a hard spin.
+
+```bash
+ros2 service call /astrobiology/carousel/home std_srvs/srv/Trigger
+ros2 topic echo /astrobiology/carousel/angle
+```
 
 ### Gantry position topic
 
@@ -374,20 +418,21 @@ Things to keep in mind:
 ### StepperMove.srv
 
 ```
-int32 steps       # signed step count (+ forward, - reverse)
-int32 speed_hz    # 1..50000 pulses/s
-int32 accel_hz2   # 1..1000000 pulses/s²
+float32 distance  # signed, in the motor's firmware units (pump/flush: pulses; centrifuge: rev)
+float32 speed     # > 0 (pulses/s or RPM)
+float32 accel     # > 0 (pulses/s² or RPM/s)
 ---
-bool  success
-string message
+bool    success
+string  message
 ```
 
-### Step calculations (1.8 deg/step motor, 16 microstep)
+### Step calculations (firmware MOTOR TABLE, 1.8°/step motors)
 
-- 3200 steps = 1 full revolution
-- 8.89 steps = 1 degree
-- 44 steps = 5 degrees
-- 533 steps = 60 degrees
+- Gantry X/Y/Z: 200 steps × 1/16 microstep / 1 mm pitch = 3200 steps per mm
+- Centrifuge/carousel `c`: 200 steps × 1/8 microstep = 1600 steps per revolution,
+  4.44 steps per degree, so 1° ≈ 4.4, 5° ≈ 22.2 and 60° ≈ 266.7 steps (`carousel/rotate` rounds
+  each step and carries the remainder)
+- Pump/flush: raw pulses (1:1)
 
 ## Serial protocol (ESP32 firmware)
 

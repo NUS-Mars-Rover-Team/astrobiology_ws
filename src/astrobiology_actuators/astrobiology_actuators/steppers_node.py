@@ -1,7 +1,16 @@
 """ROS 2 node bridging stepper move/stop services to the ESP32 over serial.
 
-Pump, flush and centrifuge use StepperMove: the caller passes steps, speed_hz,
-accel_hz2, which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
+Pump, flush and centrifuge use StepperMove (distance, speed, accel), sent unchanged
+as g1 <motor> <distance> <speed> <accel> in the firmware's units for that motor:
+pump/flush in pulses, centrifuge in revolutions, RPM and RPM/s.
+
+The centrifuge motor (c) also takes /astrobiology/centrifuge/spin (Spin: rpm for
+duration_s, then stop) and /astrobiology/carousel/rotate (Rotate: step_deg CW/CCW,
+from carousel.allowed_steps_deg); centrifuge/stop ends either.
+/astrobiology/carousel/home (Trigger) makes the wheel's current angle 0 (the cuvette
+at the camera) with the firmware's 'zero c'; from then on /astrobiology/carousel/angle
+(std_msgs/Float32, degrees clockwise, 0-360) follows the firmware's step count.  It
+stops publishing after an estop or an ESP32 restart, until home is called again.
 
 The two peristaltic pumps, pump (p, extraction) and flush (f, dosing), also take a
 volume: /astrobiology/<pump|flush>/dispense (Dispense) pumps volume_ml using that
@@ -24,6 +33,7 @@ at position_rate_hz while no gantry job is running (a job reports its own).
 """
 
 from datetime import datetime
+import math
 from pathlib import Path
 import queue
 import re
@@ -34,12 +44,19 @@ from geometry_msgs.msg import Point
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
+from std_msgs.msg import Float32
 from std_srvs.srv import Trigger
 import yaml
 
-from astrobiology_interfaces.srv import Command, Dispense, MoveAxis, StepperMove
+from astrobiology_interfaces.srv import (
+    Command, Dispense, MoveAxis, Rotate, Spin, StepperMove,
+)
 
 from astrobiology_actuators import gantry_scan as gs
+from astrobiology_actuators.centrifuge import (
+    CarouselStepper, c_revs_update, carousel_angle, carousel_reference_lost, move_time_s,
+    spin_plan,
+)
 from astrobiology_actuators.pump import PumpConfig, PumpState
 from astrobiology_actuators.serial_commands import (
     estop_command,
@@ -109,6 +126,19 @@ class SteppersNode(Node):
         self.declare_parameter('unlid_y_mm', 0.0)
         self.declare_parameter('jog_speed_mm_s', 5.0)     # gantry/{x,y,z}/move
         self.declare_parameter('jog_accel_mm_s2', 10.0)
+        # Centrifuge / carousel (firmware motor c, revolutions and RPM)
+        self.declare_parameter('centrifuge.accel_rpm_s', 100.0)
+        self.declare_parameter('centrifuge.max_rpm', 3000.0)
+        self.declare_parameter('carousel.allowed_steps_deg', [1.0, 5.0, 60.0])
+        self.declare_parameter('carousel.speed_rpm', 10.0)
+        self.declare_parameter('carousel.accel_rpm_s', 20.0)
+        self.declare_parameter('carousel.gear_ratio', 1.0)     # motor rev per carousel rev
+        self.declare_parameter('carousel.cw_positive', True)   # CW = positive revolutions
+        self._carousel = CarouselStepper(float(self.get_parameter('carousel.gear_ratio').value))
+        # True once carousel/home has set the reference; the angle is only published then
+        self._carousel_referenced = False
+        self._carousel_angle_pub = self.create_publisher(
+            Float32, 'astrobiology/carousel/angle', 10)
         # MOTORS key -> (label for messages, PumpState) for the dispensing pumps
         self._pumps = {motor: (f'{motor} ({role})', PumpState(self._pump_config(i, motor)))
                        for i, (motor, role) in enumerate(PUMPS.items(), start=1)}
@@ -169,6 +199,12 @@ class SteppersNode(Node):
                 callback_group=cb,
             )
         self.create_timer(1.0, self._tick_pumps)
+        self.create_service(Spin, 'astrobiology/centrifuge/spin',
+                            self._on_spin, callback_group=cb)
+        self.create_service(Rotate, 'astrobiology/carousel/rotate',
+                            self._on_rotate, callback_group=cb)
+        self.create_service(Trigger, 'astrobiology/carousel/home',
+                            self._on_carousel_home, callback_group=cb)
         self.create_service(Command, 'astrobiology/gantry/home',
                             self._on_home, callback_group=cb)
         self.create_service(Command, 'astrobiology/gantry/scan',
@@ -217,20 +253,77 @@ class SteppersNode(Node):
     # -- Service callbacks ---------------------------------------------------
 
     def _on_move(self, req, resp, service_name):
+        distance, speed, accel = float(req.distance), float(req.speed), float(req.accel)
+        if not (math.isfinite(distance) and speed > 0 and accel > 0
+                and math.isfinite(speed) and math.isfinite(accel)):
+            resp.success = False
+            resp.message = 'distance must be finite; speed and accel must be more than 0'
+            return resp
+        cmd = move_command(MOTORS[service_name][0], distance, speed, accel)
+        if not self._claim(service_name, resp):
+            return resp
+        self._send_serial(cmd)
+        self.get_logger().info(cmd)
+        resp.success = True
+        resp.message = cmd
+        return resp
+
+    def _claim(self, service_name, resp):
+        """Mark a motor busy (until the ESP32's done/stopped line); False if it already is."""
         with self._lock:
             if self._busy[service_name]:
                 resp.success = False
-                resp.message = 'busy'
-                return resp
+                resp.message = f'busy: {service_name} is still moving'
+                return False
             self._busy[service_name] = True
+            return True
 
-        cmd_name = MOTORS[service_name][0]
-        cmd = move_command(cmd_name, req.steps, req.speed_hz, req.accel_hz2)
+    # -- Centrifuge and carousel (motor c) -------------------------------------
+
+    def _on_spin(self, req, resp):
+        resp.success = False
+        resp.expected_s = 0.0
+        rpm, duration = float(req.rpm), float(req.duration_s)
+        accel = float(self.get_parameter('centrifuge.accel_rpm_s').value)
+        try:
+            revs = spin_plan(rpm, duration, float(self.get_parameter('centrifuge.max_rpm').value))
+        except ValueError as e:
+            resp.message = str(e)
+            return resp
+        if not self._claim('centrifuge', resp):
+            return resp
+        cmd = move_command('c', revs, rpm, accel)
         self._send_serial(cmd)
-        self.get_logger().info(cmd)
-
         resp.success = True
-        resp.message = cmd
+        resp.expected_s = float(move_time_s(revs, rpm, accel))
+        resp.message = f'spinning at {rpm:g} RPM for {duration:g} s ({revs:g} rev)'
+        self.get_logger().info(f'centrifuge: {resp.message} -> {cmd}')
+        return resp
+
+    def _on_rotate(self, req, resp):
+        resp.success = False
+        resp.expected_s = 0.0
+        step = float(req.step_deg)
+        allowed = list(self.get_parameter('carousel.allowed_steps_deg').value)
+        if not any(abs(step - a) < 1e-6 for a in allowed):
+            resp.message = f'step_deg must be one of {", ".join(f"{a:g}" for a in allowed)}'
+            return resp
+        if req.direction not in (Rotate.Request.DIRECTION_CW, Rotate.Request.DIRECTION_CCW):
+            resp.message = 'direction must be DIRECTION_CW (0) or DIRECTION_CCW (1)'
+            return resp
+        cw = req.direction == Rotate.Request.DIRECTION_CW
+        sign = 1 if cw == bool(self.get_parameter('carousel.cw_positive').value) else -1
+        rpm = float(self.get_parameter('carousel.speed_rpm').value)
+        accel = float(self.get_parameter('carousel.accel_rpm_s').value)
+        if not self._claim('centrifuge', resp):
+            return resp
+        revs = self._carousel.turn(sign * step)
+        cmd = move_command('c', revs, rpm, accel)
+        self._send_serial(cmd)
+        resp.success = True
+        resp.expected_s = float(move_time_s(revs, rpm, accel))
+        resp.message = f'carousel {step:g} deg {"CW" if cw else "CCW"}'
+        self.get_logger().info(f'{resp.message} -> {cmd}')
         return resp
 
     def _on_gantry_move(self, req, resp, service_name):
@@ -422,6 +515,31 @@ class SteppersNode(Node):
         resp.message = f'stopping gantry {job} (gantry decelerates, then halts)'
         return resp
 
+    def _on_carousel_home(self, req, resp):
+        resp.success = False
+        if self._ser is None:
+            resp.message = 'no serial connection to the ESP32 (dry_run, or the port failed to open)'
+            return resp
+        with self._lock:
+            if self._busy['centrifuge']:
+                resp.message = 'busy: the centrifuge/carousel is still moving'
+                return resp
+        self._send_serial('zero c')   # firmware step count for c back to 0
+        self._carousel = CarouselStepper(float(self.get_parameter('carousel.gear_ratio').value))
+        self._carousel_referenced = True
+        self._publish_carousel_angle(0.0)
+        resp.success = True
+        resp.message = 'carousel angle set to 0 at the camera'
+        self.get_logger().info(resp.message)
+        return resp
+
+    def _publish_carousel_angle(self, revs):
+        if not self._carousel_referenced:
+            return
+        angle = carousel_angle(revs, float(self.get_parameter('carousel.gear_ratio').value),
+                               bool(self.get_parameter('carousel.cw_positive').value))
+        self._carousel_angle_pub.publish(Float32(data=float(angle)))
+
     # -- Gantry jobs (homing, scan) ------------------------------------------
 
     def _scan_config_path(self):
@@ -538,6 +656,14 @@ class SteppersNode(Node):
             if homed:
                 for axis, is_homed in homed.items():
                     (self._homed.add if is_homed else self._homed.discard)(axis)
+
+            if self._carousel_referenced and carousel_reference_lost(line):
+                self._carousel_referenced = False
+                self.get_logger().warn('carousel position lost (estop or ESP32 restart); '
+                                       'call /astrobiology/carousel/home again')
+            revs = c_revs_update(line)
+            if revs is not None:
+                self._publish_carousel_angle(revs)
 
             update = gantry_position_update(line)
             if update:

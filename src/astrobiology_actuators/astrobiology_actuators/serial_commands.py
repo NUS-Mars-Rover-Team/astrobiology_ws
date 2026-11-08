@@ -25,9 +25,12 @@ _POS_FIELD_RE = re.compile(r'([A-Z]):(-?\d+(?:\.\d+)?)')
 DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
 
 
-def move_command(motor_name, steps, speed_hz, accel_hz2):
-    """Build a G1 move command.  Steps are signed (positive = forward)."""
-    return f'g1 {motor_name} {steps} {speed_hz} {accel_hz2}'
+def move_command(motor_name, distance, speed, accel):
+    """Build a relative G1 move in the motor's firmware units (signed distance).
+
+    Numbers are written fixed-point with up to 4 decimals, e.g. 'g1 c 0.1669 10 20'.
+    """
+    return f'g1 {motor_name} {_num(distance)} {_num(speed)} {_num(accel)}'
 
 
 def stop_command(motor_name):

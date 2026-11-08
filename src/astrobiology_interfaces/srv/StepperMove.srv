@@ -1,9 +1,14 @@
-# Move a stepper motor.  Maps directly to: g1 <motor> <steps> <speed_hz> <accel_hz2>
-# Used by all stepper actuators (pumps, centrifuge, flush, gantry axes).
+# Move a stepper motor by a relative amount.  Sent to the ESP32 unchanged as
+#   g1 <motor> <distance> <speed> <accel>
+# so the units are the firmware's for that motor (SixMotorController.ino MOTOR TABLE):
+#   pump, flush:  pulses, pulses/s, pulses/s^2
+#   centrifuge:   revolutions, RPM, RPM/s
+# Servers: /astrobiology/pump/move, /astrobiology/flush/move, /astrobiology/centrifuge/move
+# (the gantry axes use MoveAxis in mm).
 
-int32   steps           # signed step count (positive = forward, negative = reverse)
-int32   speed_hz        # pulses per second (1..50000)
-int32   accel_hz2       # pulses per second² (1..1000000)
+float32 distance        # signed (negative = reverse); fractions allowed, e.g. 0.25 rev
+float32 speed           # > 0
+float32 accel           # > 0
 ---
-bool    success
-string  message
+bool    success         # sent to the ESP32 (it reports done when the move finishes)
+string  message         # the g1 command sent, or why it was rejected
