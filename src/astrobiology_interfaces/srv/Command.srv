@@ -1,5 +1,5 @@
 # A command with no arguments that takes time to finish.
-# Servers: /astrobiology/x_gantry/home, /astrobiology/y_gantry/home, /astrobiology/z_gantry/home
+# Servers: /astrobiology/gantry/home, /astrobiology/gantry/scan, /astrobiology/gantry/handover
 ---
 bool    success         # accepted, not finished
 string  message         # reason if rejected

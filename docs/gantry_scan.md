@@ -115,7 +115,7 @@ ros2 service call /astrobiology/gantry/stop std_srvs/srv/Trigger
 - Homing, the scan and the handover are refused while any of them is in progress, while a gantry axis is busy, or
   if the node has no serial connection (`dry_run`). The scan is also refused if `calibrated` is
   false, or pictures are on and ffmpeg or the camera is missing.
-- While homing or a scan runs, `x_gantry/move`, `y_gantry/move` and `z_gantry/move` reply
+- While homing or a scan runs, `gantry/x/move`, `gantry/y/move` and `gantry/z/move` reply
   `busy: gantry homing|scan|handover in progress`.
 - If a move fails (a timeout or a firmware error), the node sends `!` like the CLI, so re-home before the next run.
 
@@ -126,6 +126,7 @@ Node parameters:
 | `scan_config` | `''` = the installed `gantry_scan.yaml` | Point it at the source file to try config changes without rebuilding |
 | `scan_dir` | `~/scans` | Where the CSVs go |
 | `handover_x_mm`, `handover_y_mm` | `53.0`, `105.0` | Cache handover position (also in `config/steppers.yaml`). Y 105 is past the scan's `travel_max.y` on purpose |
+| `jog_speed_mm_s`, `jog_accel_mm_s2` | `5.0`, `10.0` | Speed of `gantry/{x,y,z}/move` (`MoveAxis`, mm; relative jogs or absolute targets, within 0..`travel_max`) |
 | `position_rate_hz` | `2.0` | How often to poll `pos` for `/astrobiology/gantry/position` (`geometry_msgs/Point`, mm); 0 = off |
 
 The CLI options (`--z-levels`, `--no-images`, ...) have no service equivalent; set them in the config.

@@ -200,26 +200,33 @@ Full guide (commands, config, coordinate model, viewing the pictures, troublesho
 
 ### Stepper motor control
 
-All motors use the `StepperMove` service (`steps`, `speed_hz`, `accel_hz2`):
+Pump, flush and centrifuge use the `StepperMove` service (`steps`, `speed_hz`, `accel_hz2`),
+passed to the firmware unchanged. The gantry axes use `MoveAxis` in mm (below).
 
-> **Known issue:** `steppers_node` forwards `steps`/`speed_hz`/`accel_hz2` to the firmware unchanged,
-> but the current firmware reads the gantry axes in mm, mm/s and mm/s², and the centrifuge in
-> rev, RPM and RPM/s. The x/y/z gantry and centrifuge services therefore move by the wrong
-> amount, or are rejected as out of range. Until `steppers_node` is updated, move the gantry with
-> `gantry_scan goto`. Pump and flush are still raw pulses and unaffected.
+> **Known issue:** the current firmware reads the centrifuge in rev, RPM and RPM/s, so
+> `centrifuge/move` moves by the wrong amount (`steps: 1600` = 1600 turns). Use picocom
+> (`g1 c <rev> <RPM> <RPM/s>`) for now. Pump and flush are raw pulses and unaffected.
 
 ```bash
 # Move pump 3200 steps forward at 800 steps/s, 400 steps/s² accel
 ros2 service call /astrobiology/pump/move \
   astrobiology_interfaces/srv/StepperMove "{steps: 3200, speed_hz: 800, accel_hz2: 400}"
 
-# Move gantry X axis 1000 steps in reverse
-ros2 service call /astrobiology/x_gantry/move \
-  astrobiology_interfaces/srv/StepperMove "{steps: -1000, speed_hz: 1000, accel_hz2: 500}"
+# Gantry: jog X by +0.5 mm, or go to X = 28 mm (MoveAxis, mm)
+ros2 service call /astrobiology/gantry/x/move \
+  astrobiology_interfaces/srv/MoveAxis "{position_mm: 0.5, relative: true}"
+ros2 service call /astrobiology/gantry/x/move \
+  astrobiology_interfaces/srv/MoveAxis "{position_mm: 28.0, relative: false}"
 
 # Stop a motor
 ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 ```
+
+Gantry moves (`gantry/{x,y,z}/move`) reply at once (`message` like `X 0.6 -> 28 mm`,
+`expected_s`) and run at `jog_speed_mm_s` (5 mm/s, `config/steppers.yaml`). They are refused
+until that axis has been homed since `steppers_node` started (`/astrobiology/gantry/home`), if
+the target is outside 0..`travel_max` (`gantry_scan.yaml`), while that axis is still moving, or
+while gantry homing, the scan or the handover runs. Different axes can move at the same time.
 
 ### Available services
 
@@ -231,12 +238,12 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/flush/stop` | Trigger | Stop flush |
 | `/astrobiology/centrifuge/move` | StepperMove | Centrifuge motor |
 | `/astrobiology/centrifuge/stop` | Trigger | Stop centrifuge |
-| `/astrobiology/x_gantry/move` | StepperMove | Gantry X axis |
-| `/astrobiology/x_gantry/stop` | Trigger | Stop X axis |
-| `/astrobiology/y_gantry/move` | StepperMove | Gantry Y axis |
-| `/astrobiology/y_gantry/stop` | Trigger | Stop Y axis |
-| `/astrobiology/z_gantry/move` | StepperMove | Gantry Z axis |
-| `/astrobiology/z_gantry/stop` | Trigger | Stop Z axis |
+| `/astrobiology/gantry/x/move` | MoveAxis | Gantry X axis, mm, relative or absolute |
+| `/astrobiology/gantry/x/stop` | Trigger | Stop X axis |
+| `/astrobiology/gantry/y/move` | MoveAxis | Gantry Y axis, mm, relative or absolute |
+| `/astrobiology/gantry/y/stop` | Trigger | Stop Y axis |
+| `/astrobiology/gantry/z/move` | MoveAxis | Gantry Z axis, mm, relative or absolute |
+| `/astrobiology/gantry/z/stop` | Trigger | Stop Z axis |
 | `/astrobiology/uvm/set` | SetBool | UVM LED on/off |
 | `/astrobiology/uvc/set` | SetBool | UVC LED on/off |
 | `/astrobiology/laser/set` | SetBool | Laser on/off |

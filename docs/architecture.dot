@@ -119,28 +119,28 @@ digraph astrobiology {
             label="/astrobiology/\ncentrifuge/stop\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
         ];
-        x_gantry_move [
-            label="/astrobiology/\nx_gantry/move\n[StepperMove]"
+        gantry_x_move [
+            label="/astrobiology/\ngantry/x/move\n[MoveAxis, mm]"
             shape=hexagon style=filled fillcolor="#E1BEE7"
         ];
-        x_gantry_stop [
-            label="/astrobiology/\nx_gantry/stop\n[Trigger]"
+        gantry_x_stop [
+            label="/astrobiology/\ngantry/x/stop\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
         ];
-        y_gantry_move [
-            label="/astrobiology/\ny_gantry/move\n[StepperMove]"
+        gantry_y_move [
+            label="/astrobiology/\ngantry/y/move\n[MoveAxis, mm]"
             shape=hexagon style=filled fillcolor="#E1BEE7"
         ];
-        y_gantry_stop [
-            label="/astrobiology/\ny_gantry/stop\n[Trigger]"
+        gantry_y_stop [
+            label="/astrobiology/\ngantry/y/stop\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
         ];
-        z_gantry_move [
-            label="/astrobiology/\nz_gantry/move\n[StepperMove]"
+        gantry_z_move [
+            label="/astrobiology/\ngantry/z/move\n[MoveAxis, mm]"
             shape=hexagon style=filled fillcolor="#E1BEE7"
         ];
-        z_gantry_stop [
-            label="/astrobiology/\nz_gantry/stop\n[Trigger]"
+        gantry_z_stop [
+            label="/astrobiology/\ngantry/z/stop\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
         ];
         gantry_home [
@@ -217,12 +217,12 @@ digraph astrobiology {
     steppers_node -> flush_stop      [label="server" color="#6A1B9A"];
     steppers_node -> centrifuge_move [label="server" color="#6A1B9A"];
     steppers_node -> centrifuge_stop [label="server" color="#6A1B9A"];
-    steppers_node -> x_gantry_move   [label="server" color="#6A1B9A"];
-    steppers_node -> x_gantry_stop   [label="server" color="#6A1B9A"];
-    steppers_node -> y_gantry_move   [label="server" color="#6A1B9A"];
-    steppers_node -> y_gantry_stop   [label="server" color="#6A1B9A"];
-    steppers_node -> z_gantry_move   [label="server" color="#6A1B9A"];
-    steppers_node -> z_gantry_stop   [label="server" color="#6A1B9A"];
+    steppers_node -> gantry_x_move   [label="server" color="#6A1B9A"];
+    steppers_node -> gantry_x_stop   [label="server" color="#6A1B9A"];
+    steppers_node -> gantry_y_move   [label="server" color="#6A1B9A"];
+    steppers_node -> gantry_y_stop   [label="server" color="#6A1B9A"];
+    steppers_node -> gantry_z_move   [label="server" color="#6A1B9A"];
+    steppers_node -> gantry_z_stop   [label="server" color="#6A1B9A"];
     steppers_node -> gantry_home [label="server" color="#6A1B9A"];
     steppers_node -> gantry_scan [label="server" color="#6A1B9A"];
     steppers_node -> gantry_handover [label="server" color="#6A1B9A"];

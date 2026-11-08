@@ -79,3 +79,14 @@ def test_gantry_position_update():
     assert upd('homed y steps=0') == {'y': 0.0}
     assert upd('done p steps=3200 pos=3200') is None      # not a gantry axis
     assert upd('ok x accepted') is None
+
+
+def test_gantry_homed_update():
+    from astrobiology_actuators.serial_commands import gantry_homed_update as upd
+    assert upd('homed z steps=0') == {'z': True}
+    assert upd('homing y') == {'y': False}
+    assert upd('error homing failed x: endstop not found within max travel') == {'x': False}
+    assert upd('aborted z; physical position may be lost') == {'z': False}
+    assert upd('ESTOP all (!); physical position may be lost') == {'x': False, 'y': False, 'z': False}
+    assert upd('aborted p; physical position may be lost') is None
+    assert upd('done x steps=3200 pos=1.0000') is None

@@ -91,3 +91,26 @@ def gantry_position_update(line):
     if m:
         return {m.group(1): 0.0}
     return None
+
+
+_HOMING_RE = re.compile(r'^homing\s+([xyz])\b')
+_HOMING_FAILED_RE = re.compile(r'^error homing failed\s+([xyz])\b')
+_ABORTED_RE = re.compile(r'^aborted\s+([xyz])\b')
+
+
+def gantry_homed_update(line):
+    """Which gantry axes an ESP32 line homes (True) or un-homes (False); None if none.
+
+    'homed x' -> {'x': True}.  'homing x' (position being redefined), 'error
+    homing failed x', 'aborted x' (estop) -> {'x': False}.  'ESTOP all' -> all False.
+    """
+    m = _HOMED_RE.match(line)
+    if m:
+        return {m.group(1): True}
+    for regex in (_HOMING_RE, _HOMING_FAILED_RE, _ABORTED_RE):
+        m = regex.match(line)
+        if m:
+            return {m.group(1): False}
+    if line.startswith('ESTOP all'):
+        return dict.fromkeys('xyz', False)
+    return None

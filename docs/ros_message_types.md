@@ -58,7 +58,7 @@ Move a stepper motor. Maps directly to `g1 <motor> <steps> <speed_hz> <accel_hz2
 | **Res** | `success` | `bool` | Whether accepted |
 | **Res** | `message` | `string` | Error reason if failed |
 
-Servers: `/astrobiology/pump/move`, `/astrobiology/flush/move`, `/astrobiology/centrifuge/move`, `/astrobiology/x_gantry/move`, `/astrobiology/y_gantry/move`, `/astrobiology/z_gantry/move`
+Servers: `/astrobiology/pump/move`, `/astrobiology/flush/move`, `/astrobiology/centrifuge/move` (the gantry axes use `MoveAxis`)
 
 ```bash
 # Pump forward 3200 steps
@@ -66,10 +66,6 @@ ros2 service call /astrobiology/pump/move \
   astrobiology_interfaces/srv/StepperMove \
   "{steps: 3200, speed_hz: 800, accel_hz2: 400}"
 
-# Gantry X reverse 1000 steps
-ros2 service call /astrobiology/x_gantry/move \
-  astrobiology_interfaces/srv/StepperMove \
-  "{steps: -1000, speed_hz: 1000, accel_hz2: 500}"
 ```
 
 ### `Dispense.srv`
@@ -104,16 +100,16 @@ Move one gantry axis to an absolute position or by a relative offset.
 | **Res** | `message` | `string` | Reason if rejected |
 | **Res** | `expected_s` | `float32` | Estimated time to finish; 0 if rejected |
 
-Servers: `/astrobiology/x_gantry/move`, `/astrobiology/y_gantry/move`, `/astrobiology/z_gantry/move`
+Servers: `/astrobiology/gantry/x/move`, `/astrobiology/gantry/y/move`, `/astrobiology/gantry/z/move` (`steppers_node`; the axis must be homed, target within 0..`travel_max`)
 
 ```bash
-# Move Z gantry to 25 mm absolute
-ros2 service call /astrobiology/z_gantry/move \
+# Move Z gantry to 2.5 mm absolute (within travel_max.z)
+ros2 service call /astrobiology/gantry/z/move \
   astrobiology_interfaces/srv/MoveAxis \
-  "{position_mm: 25.0, relative: false}"
+  "{position_mm: 2.5, relative: false}"
 
 # Nudge Y gantry +3 mm relative
-ros2 service call /astrobiology/y_gantry/move \
+ros2 service call /astrobiology/gantry/y/move \
   astrobiology_interfaces/srv/MoveAxis \
   "{position_mm: 3.0, relative: true}"
 ```
@@ -129,11 +125,11 @@ A command with no arguments that takes time to finish.
 | **Res** | `message` | `string` | Reason if rejected |
 | **Res** | `expected_s` | `float32` | Estimated time to finish; 0 if rejected |
 
-Servers: `/astrobiology/x_gantry/home`, `/astrobiology/y_gantry/home`, `/astrobiology/z_gantry/home`
+Servers: `/astrobiology/gantry/home`, `/astrobiology/gantry/scan`, `/astrobiology/gantry/handover` (`steppers_node`)
 
 ```bash
-# Home X gantry
-ros2 service call /astrobiology/x_gantry/home \
+# Home the gantry (Z, then Y, then X)
+ros2 service call /astrobiology/gantry/home \
   astrobiology_interfaces/srv/Command
 ```
 
@@ -252,7 +248,7 @@ No request fields. Used for stop commands and spectro zero-reference.
 | **Res** | `success` | `bool` | Whether it succeeded |
 | **Res** | `message` | `string` | Informational |
 
-Servers: `/astrobiology/pump/stop`, `/astrobiology/flush/stop`, `/astrobiology/centrifuge/stop`, `/astrobiology/x_gantry/stop`, `/astrobiology/y_gantry/stop`, `/astrobiology/z_gantry/stop`, `/spectro/.../set_zero_reference`, `/spectro/.../clear_zero_reference`
+Servers: `/astrobiology/pump/stop`, `/astrobiology/flush/stop`, `/astrobiology/centrifuge/stop`, `/astrobiology/gantry/x/stop`, `/astrobiology/gantry/y/stop`, `/astrobiology/gantry/z/stop`, `/astrobiology/gantry/stop`, `/spectro/.../set_zero_reference`, `/spectro/.../clear_zero_reference`
 
 ```bash
 # Stop the pump

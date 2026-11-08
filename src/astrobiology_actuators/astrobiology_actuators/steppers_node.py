@@ -1,7 +1,11 @@
 """ROS 2 node bridging stepper move/stop services to the ESP32 over serial.
 
-Services use StepperMove: the caller passes steps, speed_hz, accel_hz2
-which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
+Pump, flush and centrifuge use StepperMove: the caller passes steps, speed_hz,
+accel_hz2, which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
+
+gantry/{x,y,z}/move use MoveAxis in mm: relative (jog by position_mm) or absolute
+(go to position_mm).  The axis must be homed and the target within 0..travel_max
+(gantry_scan.yaml); the move runs at jog_speed_mm_s and the service replies at once.
 
 It also runs gantry jobs in the background, sharing this node's serial port:
 /astrobiology/gantry/home homes Z, Y, X; /astrobiology/gantry/scan runs the
@@ -28,13 +32,15 @@ from rclpy.node import Node
 from std_srvs.srv import Trigger
 import yaml
 
-from astrobiology_interfaces.srv import Command, StepperMove
+from astrobiology_interfaces.srv import Command, MoveAxis, StepperMove
 
 from astrobiology_actuators import gantry_scan as gs
 from astrobiology_actuators.serial_commands import (
     estop_command,
+    gantry_homed_update,
     gantry_position_update,
     move_command,
+    move_mm_command,
     pos_command,
     stop_command,
 )
@@ -44,11 +50,11 @@ MOTORS = {
     'pump':       ('p', 'pump'),
     'flush':      ('f', 'flush'),
     'centrifuge': ('c', 'centrifuge'),
-    'x_gantry':   ('x', 'x'),
-    'y_gantry':   ('y', 'y'),
-    'z_gantry':   ('z', 'z'),
+    'gantry/x':   ('x', 'x'),
+    'gantry/y':   ('y', 'y'),
+    'gantry/z':   ('z', 'z'),
 }
-GANTRY = ('x_gantry', 'y_gantry', 'z_gantry')
+GANTRY = ('gantry/x', 'gantry/y', 'gantry/z')
 
 # Firmware feedback patterns
 _DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
@@ -73,6 +79,8 @@ class SteppersNode(Node):
         self.declare_parameter('position_rate_hz', 2.0)   # 0 = don't poll 'pos'
         self.declare_parameter('handover_x_mm', 53.0)     # cache handover position
         self.declare_parameter('handover_y_mm', 105.0)
+        self.declare_parameter('jog_speed_mm_s', 5.0)     # gantry/{x,y,z}/move
+        self.declare_parameter('jog_accel_mm_s2', 10.0)
 
         self._dry_run = self.get_parameter('dry_run').value
         self._busy = {name: False for name in MOTORS}
@@ -96,6 +104,8 @@ class SteppersNode(Node):
 
         # Last gantry X/Y/Z (mm) the ESP32 reported; published once all three are known
         self._position = {}
+        # Gantry axes homed since this node started (position means something)
+        self._homed = set()
         self._position_pub = self.create_publisher(Point, 'astrobiology/gantry/position', 10)
 
         if not self._dry_run:
@@ -104,11 +114,18 @@ class SteppersNode(Node):
         # Services — one move + stop pair per motor
         cb = ReentrantCallbackGroup()
         for name in MOTORS:
-            self.create_service(
-                StepperMove, f'astrobiology/{name}/move',
-                lambda req, resp, n=name: self._on_move(req, resp, n),
-                callback_group=cb,
-            )
+            if name in GANTRY:
+                self.create_service(
+                    MoveAxis, f'astrobiology/{name}/move',
+                    lambda req, resp, n=name: self._on_gantry_move(req, resp, n),
+                    callback_group=cb,
+                )
+            else:
+                self.create_service(
+                    StepperMove, f'astrobiology/{name}/move',
+                    lambda req, resp, n=name: self._on_move(req, resp, n),
+                    callback_group=cb,
+                )
             self.create_service(
                 Trigger, f'astrobiology/{name}/stop',
                 lambda req, resp, n=name: self._on_stop(req, resp, n),
@@ -159,10 +176,6 @@ class SteppersNode(Node):
 
     def _on_move(self, req, resp, service_name):
         with self._lock:
-            if service_name in GANTRY and self._gantry_job is not None:
-                resp.success = False
-                resp.message = f'busy: gantry {self._gantry_job} in progress'
-                return resp
             if self._busy[service_name]:
                 resp.success = False
                 resp.message = 'busy'
@@ -176,6 +189,59 @@ class SteppersNode(Node):
 
         resp.success = True
         resp.message = cmd
+        return resp
+
+    def _on_gantry_move(self, req, resp, service_name):
+        axis = MOTORS[service_name][0]
+        name = axis.upper()
+        resp.success = False
+        resp.expected_s = 0.0
+        if self._ser is None:
+            resp.message = 'no serial connection to the ESP32 (dry_run, or the port failed to open)'
+            return resp
+        job = self._gantry_job   # checked again under the lock below
+        if job is not None:
+            resp.message = f'busy: gantry {job} in progress'
+            return resp
+        if axis not in self._homed:
+            resp.message = f'{name} is not homed; call /astrobiology/gantry/home first'
+            return resp
+        current = self._position.get(axis)
+        if current is None:
+            resp.message = f'no {name} position from the ESP32 yet'
+            return resp
+        try:
+            limit = gs.ScanConfig.from_yaml(self._scan_config_path()).travel_max[axis]
+        except (gs.ScanConfigError, OSError, yaml.YAMLError) as e:
+            resp.message = f'cannot read travel limits: {e}'
+            return resp
+        offset = float(req.position_mm)
+        target = round(current + offset if req.relative else offset, 4)
+        if not 0.0 <= target <= limit:
+            resp.message = f'{name} {target:g} mm is outside 0..{limit:g} mm'
+            return resp
+
+        delta = target - current
+        speed = float(self.get_parameter('jog_speed_mm_s').value)
+        accel = float(self.get_parameter('jog_accel_mm_s2').value)
+        with self._lock:
+            if self._gantry_job is not None:
+                resp.message = f'busy: gantry {self._gantry_job} in progress'
+                return resp
+            if self._busy[service_name]:
+                resp.message = f'busy: {name} is still moving'
+                return resp
+            if abs(delta) < gs.HALF_STEP_MM:
+                resp.success = True
+                resp.message = f'{name} already at {target:g} mm'
+                return resp
+            self._busy[service_name] = True   # cleared by the ESP32's done/stopped line
+
+        self._send_serial(move_mm_command(axis, delta, speed, accel))
+        resp.success = True
+        resp.message = f'{name} {current:g} -> {target:g} mm'
+        resp.expected_s = abs(delta) / speed + speed / accel
+        self.get_logger().info(f'{service_name}: {resp.message}')
         return resp
 
     def _on_stop(self, req, resp, service_name):
@@ -370,6 +436,11 @@ class SteppersNode(Node):
             if gantry_lines is not None:
                 gantry_lines.put(line)
 
+            homed = gantry_homed_update(line)
+            if homed:
+                for axis, is_homed in homed.items():
+                    (self._homed.add if is_homed else self._homed.discard)(axis)
+
             update = gantry_position_update(line)
             if update:
                 self._update_position(update)
@@ -418,7 +489,7 @@ class SteppersNode(Node):
 
     def _clear_busy(self, firmware_name):
         # Firmware feedback uses short ids (p, f, c, x, y, z) or, on older builds,
-        # full names; _busy keys are service names (pump, ..., x_gantry, ...)
+        # full names; _busy keys are service names (pump, ..., gantry/x, ...)
         svc = self._feedback_to_service.get(firmware_name)
         if svc is None:
             return

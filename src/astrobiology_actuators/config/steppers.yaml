@@ -10,3 +10,6 @@ steppers_node:
     # then Y and X home again.  Y 105 is beyond the scan's travel_max; it's the handover spot.
     handover_x_mm: 53.0
     handover_y_mm: 105.0
+    # gantry/{x,y,z}/move (MoveAxis, mm): jog speed and acceleration
+    jog_speed_mm_s: 5.0
+    jog_accel_mm_s2: 10.0
