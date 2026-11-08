@@ -1,4 +1,6 @@
-// Astrobiology ROS 2 Architecture
+// Astrobiology ROS 2 architecture, laid out like rqt_graph:
+//   hardware -> node (ellipse) -> topic (box) -> subscriber
+// Every service is listed in the table beside the node that serves it.
 // Render: dot -Tpng architecture.dot -o architecture.png
 //     or: dot -Tsvg architecture.dot -o architecture.svg
 //     or: paste into https://dreampuf.github.io/GraphvizOnline
@@ -9,324 +11,116 @@ digraph astrobiology {
     node [fontname="Helvetica", fontsize=11];
     edge [fontname="Helvetica", fontsize=9];
     bgcolor="white";
-    pad=0.5;
-    nodesep=0.6;
-    ranksep=1.2;
+    pad=0.3;
+    nodesep=0.25;
+    ranksep=0.6;
 
     // ── Hardware ──────────────────────────────────────────────
-    subgraph cluster_hw {
-        label="Hardware";
-        style=dashed;
-        color="#888888";
-        fontcolor="#888888";
+    node [shape=box3d, style=filled, fillcolor="#FFE0B2"];
+    esp_steppers  [label="ESP32 stepper controller\nSixMotorController.ino\npump, flush, centrifuge, x, y, z"];
+    esp_lights    [label="Arduino lights\nLEDdrill.ino\nUVM, UVC, laser, halogen"];
+    arduino_drill [label="Arduino drill\nLAdrill.ino"];
+    btc100        [label="B&W Tek BTC100\nRaman spectrometer"];
+    spectro_cam   [label="Sonix spectroscope\ncamera"];
 
-        esp_steppers [
-            label="ESP32\n6-Channel Stepper\nController\n(pump, flush, centrifuge,\nx, y, z)"
-            shape=box3d style=filled fillcolor="#FFE0B2"
-        ];
-        esp_lights [
-            label="Arduino\nScience Lights\n(LEDdrill.ino)\n(UVM, UVC, laser, halogen)"
-            shape=box3d style=filled fillcolor="#FFE0B2"
-        ];
-        arduino_drill [
-            label="Arduino\nDrill\n(LAdrill.ino)"
-            shape=box3d style=filled fillcolor="#FFE0B2"
-        ];
-        btc100 [
-            label="B&W Tek BTC100\nRaman spectrometer\n(RS232 / CH340)"
-            shape=box3d style=filled fillcolor="#FFE0B2"
-        ];
-        spectro_cam [
-            label="Sonix\nSpectroscope\nCamera"
-            shape=box3d style=filled fillcolor="#FFE0B2"
-        ];
-    }
+    // ── Nodes ─────────────────────────────────────────────────
+    node [shape=ellipse, style=filled, fillcolor="#BBDEFB"];
+    steppers_node [label="/steppers_node"];
+    lights_node   [label="/lights_node"];
+    drill_node    [label="/drill_node"];
+    raman_node    [label="/raman/raman_node"];
+    spectrum_node [label="/spectro/spectrum_node"];
 
-    // ── ROS 2 Nodes ──────────────────────────────────────────
-    subgraph cluster_nodes {
-        label="ROS 2 Nodes";
-        style=rounded;
-        color="#1565C0";
-        fontcolor="#1565C0";
+    // ── Topics ────────────────────────────────────────────────
+    node [shape=box, style="filled,rounded", fillcolor="#C8E6C9"];
+    gantry_position  [label="/astrobiology/gantry/position\ngeometry_msgs/Point (mm)"];
+    carousel_angle   [label="/astrobiology/carousel/angle\nstd_msgs/Float32 (deg)"];
+    raman_spectrum   [label="/raman/spectrum\nastrobiology_msgs/RamanSpectrum"];
+    spectro_spectrum [label="/spectro/spectrum\nastrobiology_msgs/Spectrum"];
+    spectro_preview  [label="/spectro/preview/compressed\nsensor_msgs/CompressedImage"];
 
-        steppers_node [
-            label="steppers_node\n(astrobiology_actuators)"
-            shape=ellipse style=filled fillcolor="#BBDEFB"
-        ];
-        lights_node [
-            label="lights_node\n(astrobiology_actuators)"
-            shape=ellipse style=filled fillcolor="#BBDEFB"
-        ];
-        drill_node [
-            label="drill_node\n(astrobiology_actuators)"
-            shape=ellipse style=filled fillcolor="#BBDEFB"
-        ];
-        raman_node [
-            label="raman_node\n(raman_spectrometer)"
-            shape=ellipse style=filled fillcolor="#BBDEFB"
-        ];
-        spectrum_node [
-            label="spectrum_node\n(spectro_cam)"
-            shape=ellipse style=filled fillcolor="#BBDEFB"
-        ];
-        spectrum_plot [
-            label="spectrum_plot\n(diagnostic)"
-            shape=ellipse style=filled fillcolor="#E3F2FD"
-        ];
-    }
+    // ── Subscribers ───────────────────────────────────────────
+    node [shape=ellipse, style=filled, fillcolor="#E3F2FD"];
+    spectrum_plot [label="/spectrum_plot\n(diagnostic)"];
+    rover_gui     [label="/rover_gui\n(Mars-Rover-GUI, planned)", style="filled,dashed"];
 
-    // ── Topics (publishers) ──────────────────────────────────
-    subgraph cluster_topics {
-        label="Topics";
-        style=rounded;
-        color="#2E7D32";
-        fontcolor="#2E7D32";
+    // ── Services: one table per node, every service listed ────
+    node [shape=plain, fontsize=9.5];
+    steppers_srv [label=<
+      <table border="0" cellborder="0" cellspacing="0" cellpadding="3" bgcolor="#F3E5F5" color="#6A1B9A">
+        <tr><td colspan="4" align="left" bgcolor="#E1BEE7"><b>/steppers_node services</b>  (prefix /astrobiology/)</td></tr>
+        <tr>
+          <td align="left" valign="top"><i>gantry jobs</i><br align="left"/>gantry/home · Command<br align="left"/>gantry/scan · Command<br align="left"/>gantry/handover · Command<br align="left"/>gantry/lid · Command<br align="left"/>gantry/unlid · Command<br align="left"/>gantry/stop · Trigger<br align="left"/></td>
+          <td align="left" valign="top"><i>gantry axes</i><br align="left"/>gantry/x/move · MoveAxis<br align="left"/>gantry/y/move · MoveAxis<br align="left"/>gantry/z/move · MoveAxis<br align="left"/>gantry/x/stop · Trigger<br align="left"/>gantry/y/stop · Trigger<br align="left"/>gantry/z/stop · Trigger<br align="left"/></td>
+          <td align="left" valign="top"><i>pumps</i><br align="left"/>pump/move · StepperMove<br align="left"/>pump/dispense · Dispense<br align="left"/>pump/stop · Trigger<br align="left"/>flush/move · StepperMove<br align="left"/>flush/dispense · Dispense<br align="left"/>flush/stop · Trigger<br align="left"/></td>
+          <td align="left" valign="top"><i>centrifuge / carousel</i><br align="left"/>centrifuge/move · StepperMove<br align="left"/>centrifuge/spin · Spin<br align="left"/>centrifuge/stop · Trigger<br align="left"/>carousel/rotate · Rotate<br align="left"/>carousel/home · Trigger<br align="left"/></td>
+        </tr>
+      </table>
+    >];
+    lights_srv [label=<
+      <table border="0" cellborder="0" cellspacing="0" cellpadding="3" bgcolor="#F3E5F5">
+        <tr><td align="left" bgcolor="#E1BEE7"><b>/lights_node services</b></td></tr>
+        <tr><td align="left">/astrobiology/uvm/set · SetBool<br align="left"/>/astrobiology/uvc/set · SetBool<br align="left"/>/astrobiology/laser/set · SetBool<br align="left"/>/astrobiology/halogen/set · SetBool<br align="left"/></td></tr>
+      </table>
+    >];
+    drill_srv [label=<
+      <table border="0" cellborder="0" cellspacing="0" cellpadding="3" bgcolor="#F3E5F5">
+        <tr><td align="left" bgcolor="#E1BEE7"><b>/drill_node services</b></td></tr>
+        <tr><td align="left">/astrobiology/drill/start · Trigger<br align="left"/>/astrobiology/drill/stop · Trigger<br align="left"/></td></tr>
+      </table>
+    >];
+    raman_srv [label=<
+      <table border="0" cellborder="0" cellspacing="0" cellpadding="3" bgcolor="#F3E5F5">
+        <tr><td align="left" bgcolor="#E1BEE7"><b>/raman/raman_node services</b></td></tr>
+        <tr><td align="left">/raman/start · Trigger<br align="left"/>/raman/stop · Trigger<br align="left"/>/raman/set_dark · Trigger<br align="left"/>/raman/clear_dark · Trigger<br align="left"/></td></tr>
+      </table>
+    >];
+    spectro_srv [label=<
+      <table border="0" cellborder="0" cellspacing="0" cellpadding="3" bgcolor="#F3E5F5">
+        <tr><td align="left" bgcolor="#E1BEE7"><b>/spectro/spectrum_node services</b></td></tr>
+        <tr><td align="left">/spectro/spectrum_node/set_zero_reference · Trigger<br align="left"/>/spectro/spectrum_node/clear_zero_reference · Trigger<br align="left"/></td></tr>
+      </table>
+    >];
 
-        spectrum_topic [
-            label="/spectro/\nspectrum\n[Spectrum]"
-            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
-        ];
-        preview_topic [
-            label="/spectro/preview/\ncompressed\n[CompressedImage]"
-            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
-        ];
-        raman_topic [
-            label="/raman/\nspectrum\n[RamanSpectrum]"
-            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
-        ];
-        carousel_angle_topic [
-            label="/astrobiology/carousel/\nangle\n[Float32, deg]"
-            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
-        ];
-        gantry_position_topic [
-            label="/astrobiology/gantry/\nposition\n[Point, mm]"
-            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
-        ];
-    }
+    // ── Hardware -> nodes (serial / V4L2) ─────────────────────
+    edge [color="#E65100", style=bold];
+    esp_steppers  -> steppers_node [label="/dev/esp_steppers\n115200, g1"];
+    esp_lights    -> lights_node   [label="/dev/esp_lights\n9600"];
+    arduino_drill -> drill_node    [label="/dev/uno_drill\n9600"];
+    btc100        -> raman_node    [label="/dev/raman_spectroscope\n115200"];
+    spectro_cam   -> spectrum_node [label="/dev/spectroscope\nV4L2"];
 
-    // ── Services ─────────────────────────────────────────────
-    subgraph cluster_services {
-        label="Services";
-        style=rounded;
-        color="#6A1B9A";
-        fontcolor="#6A1B9A";
+    // ── Nodes -> topics -> subscribers ────────────────────────
+    edge [color="#2E7D32", style=solid, label=""];
+    steppers_node -> gantry_position;
+    steppers_node -> carousel_angle;
+    raman_node    -> raman_spectrum;
+    spectrum_node -> spectro_spectrum;
+    spectrum_node -> spectro_preview;
+    spectro_spectrum -> spectrum_plot;
 
-        pump_move [
-            label="/astrobiology/\npump/move\n[StepperMove]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        pump_dispense [
-            label="/astrobiology/\npump/dispense\n[Dispense]\n(extraction)"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        flush_dispense [
-            label="/astrobiology/\nflush/dispense\n[Dispense]\n(dosing)"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        pump_stop [
-            label="/astrobiology/\npump/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        flush_move [
-            label="/astrobiology/\nflush/move\n[StepperMove]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        flush_stop [
-            label="/astrobiology/\nflush/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        centrifuge_move [
-            label="/astrobiology/\ncentrifuge/move\n[StepperMove]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        centrifuge_spin [
-            label="/astrobiology/\ncentrifuge/spin\n[Spin]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        carousel_home [
-            label="/astrobiology/\ncarousel/home\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        carousel_rotate [
-            label="/astrobiology/\ncarousel/rotate\n[Rotate]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        centrifuge_stop [
-            label="/astrobiology/\ncentrifuge/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_x_move [
-            label="/astrobiology/\ngantry/x/move\n[MoveAxis, mm]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        gantry_x_stop [
-            label="/astrobiology/\ngantry/x/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_y_move [
-            label="/astrobiology/\ngantry/y/move\n[MoveAxis, mm]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        gantry_y_stop [
-            label="/astrobiology/\ngantry/y/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_z_move [
-            label="/astrobiology/\ngantry/z/move\n[MoveAxis, mm]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        gantry_z_stop [
-            label="/astrobiology/\ngantry/z/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_home [
-            label="/astrobiology/\ngantry/home\n[Command]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_scan [
-            label="/astrobiology/\ngantry/scan\n[Command]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_handover [
-            label="/astrobiology/\ngantry/handover\n[Command]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_lid [
-            label="/astrobiology/\ngantry/lid\n[Command]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_unlid [
-            label="/astrobiology/\ngantry/unlid\n[Command]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        gantry_stop [
-            label="/astrobiology/\ngantry/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
+    edge [color="#2E7D32", style=dashed];
+    gantry_position  -> rover_gui;
+    carousel_angle   -> rover_gui;
+    raman_spectrum   -> rover_gui;
+    spectro_spectrum -> rover_gui;
 
-        uvm_set [
-            label="/astrobiology/\nuvm/set\n[SetBool]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        uvc_set [
-            label="/astrobiology/\nuvc/set\n[SetBool]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        laser_set [
-            label="/astrobiology/\nlaser/set\n[SetBool]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        halogen_set [
-            label="/astrobiology/\nhalogen/set\n[SetBool]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-
-        drill_start [
-            label="/astrobiology/\ndrill/start\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-        drill_stop [
-            label="/astrobiology/\ndrill/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#E1BEE7"
-        ];
-
-        raman_start [
-            label="/raman/start\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        raman_stop [
-            label="/raman/stop\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        raman_set_dark [
-            label="/raman/set_dark\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        raman_clear_dark [
-            label="/raman/clear_dark\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-
-        set_zero [
-            label="/spectro/.../\nset_zero_reference\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-        clear_zero [
-            label="/spectro/.../\nclear_zero_reference\n[Trigger]"
-            shape=hexagon style=filled fillcolor="#F3E5F5"
-        ];
-    }
-
-    // ── Edges: hardware → nodes ──────────────────────────────
-    esp_steppers -> steppers_node      [label="serial\n/dev/esp_steppers\n115200\ng1 protocol" style=bold color="#E65100"];
-    esp_lights   -> lights_node    [label="serial\n/dev/esp_lights\n9600\n<light> on|off" style=bold color="#E65100"];
-    arduino_drill -> drill_node    [label="serial\n/dev/uno_drill\n9600\nb | s" style=bold color="#E65100"];
-    btc100       -> raman_node     [label="serial\n/dev/raman_spectroscope\n115200 (K0)" style=bold color="#E65100"];
-    spectro_cam  -> spectrum_node  [label="V4L2\n/dev/spectroscope" style=bold color="#E65100"];
-
-    // ── Edges: nodes → topics ────────────────────────────────
-    spectrum_node -> spectrum_topic [label="pub" color="#2E7D32"];
-    raman_node -> raman_topic [label="pub" color="#2E7D32"];
-    raman_node -> raman_start [label="server" color="#6A1B9A"];
-    raman_node -> raman_stop [label="server" color="#6A1B9A"];
-    raman_node -> raman_set_dark [label="server" color="#6A1B9A"];
-    raman_node -> raman_clear_dark [label="server" color="#6A1B9A"];
-    spectrum_node -> preview_topic  [label="pub" color="#2E7D32"];
-    steppers_node -> gantry_position_topic [label="pub" color="#2E7D32"];
-
-    // ── Edges: topics → subscribers ──────────────────────────
-    spectrum_topic -> spectrum_plot [label="sub" color="#2E7D32" style=dashed];
-
-    // ── Edges: nodes → services ──────────────────────────────
-    steppers_node -> pump_move       [label="server" color="#6A1B9A"];
-    steppers_node -> pump_stop       [label="server" color="#6A1B9A"];
-    steppers_node -> flush_move      [label="server" color="#6A1B9A"];
-    steppers_node -> flush_stop      [label="server" color="#6A1B9A"];
-    steppers_node -> pump_dispense [label="server" color="#6A1B9A"];
-    steppers_node -> flush_dispense [label="server" color="#6A1B9A"];
-    steppers_node -> centrifuge_move [label="server" color="#6A1B9A"];
-    steppers_node -> centrifuge_stop [label="server" color="#6A1B9A"];
-    steppers_node -> centrifuge_spin [label="server" color="#6A1B9A"];
-    steppers_node -> carousel_rotate [label="server" color="#6A1B9A"];
-    steppers_node -> carousel_home [label="server" color="#6A1B9A"];
-    steppers_node -> carousel_angle_topic [label="pub" color="#2E7D32"];
-    steppers_node -> gantry_x_move   [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_x_stop   [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_y_move   [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_y_stop   [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_z_move   [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_z_stop   [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_home [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_scan [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_handover [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_lid [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_unlid [label="server" color="#6A1B9A"];
-    steppers_node -> gantry_stop [label="server" color="#6A1B9A"];
-
-    lights_node -> uvm_set      [label="server" color="#6A1B9A"];
-    lights_node -> uvc_set      [label="server" color="#6A1B9A"];
-    lights_node -> laser_set    [label="server" color="#6A1B9A"];
-    lights_node -> halogen_set  [label="server" color="#6A1B9A"];
-
-    drill_node -> drill_start   [label="server" color="#6A1B9A"];
-    drill_node -> drill_stop    [label="server" color="#6A1B9A"];
-
-    spectrum_node -> set_zero   [label="server" color="#6A1B9A"];
-    spectrum_node -> clear_zero [label="server" color="#6A1B9A"];
+    // ── Nodes -> their services ───────────────────────────────
+    edge [color="#6A1B9A", style=dotted, arrowhead=none];
+    steppers_node -> steppers_srv;
+    lights_node   -> lights_srv;
+    drill_node    -> drill_srv;
+    raman_node    -> raman_srv;
+    spectrum_node -> spectro_srv;
 
     // ── Legend ────────────────────────────────────────────────
     subgraph cluster_legend {
-        label="Legend";
-        style=rounded;
-        color="#424242";
-        fontcolor="#424242";
-        fontsize=10;
-
-        leg_hw   [label="Hardware"  shape=box3d     style=filled fillcolor="#FFE0B2" fontsize=9];
-        leg_node [label="ROS Node"  shape=ellipse   style=filled fillcolor="#BBDEFB" fontsize=9];
-        leg_topic[label="Topic"     shape=rectangle style="filled,rounded" fillcolor="#C8E6C9" fontsize=9];
-        leg_srv  [label="Service"   shape=hexagon   style=filled fillcolor="#E1BEE7" fontsize=9];
-
-        leg_hw -> leg_node -> leg_topic -> leg_srv [style=invis];
+        label="Legend"; fontsize=10; style=rounded; color="#9E9E9E"; fontcolor="#616161";
+        leg_hw    [label="hardware", shape=box3d, style=filled, fillcolor="#FFE0B2", fontsize=9];
+        leg_node  [label="ROS node", shape=ellipse, style=filled, fillcolor="#BBDEFB", fontsize=9];
+        leg_topic [label="topic", shape=box, style="filled,rounded", fillcolor="#C8E6C9", fontsize=9];
+        leg_srv   [label="services\n(the GUI calls these)", shape=box, style=filled, fillcolor="#F3E5F5", fontsize=9];
+        leg_sub   [label="planned subscriber", shape=ellipse, style="filled,dashed", fillcolor="#E3F2FD", fontsize=9];
+        leg_hw -> leg_node -> leg_topic -> leg_srv -> leg_sub [style=invis];
     }
 }

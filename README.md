@@ -4,9 +4,11 @@ ROS 2 (Humble) workspace for the NUS Mars Rover astrobiology payload. Controls s
 
 ## Architecture
 
-![Architecture](docs/architecture.dot)
+![Architecture](docs/architecture.png)
 
-Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into [GraphvizOnline](https://dreampuf.github.io/GraphvizOnline).
+Source: [`docs/architecture.dot`](docs/architecture.dot). After editing it, re-render the image with
+`dot -Tpng docs/architecture.dot -o docs/architecture.png` (or paste it into
+[GraphvizOnline](https://dreampuf.github.io/GraphvizOnline)).
 
 GUI developers: [`docs/gui_ros_wiring.md`](docs/gui_ros_wiring.md) maps every control on the four
 Science sub-tabs to the service or topic it should use.
