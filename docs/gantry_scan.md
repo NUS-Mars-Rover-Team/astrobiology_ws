@@ -90,27 +90,31 @@ Options for `scan`:
 | `--image-dir DIR` | Save pictures somewhere other than `~/Pictures` |
 | `--out FILE.csv` | CSV path (default `scans/gantry_scan_<time>.csv` under the current folder) |
 
-## As a ROS service (steppers_node)
+## As ROS services (steppers_node)
 
-`steppers_node` runs the same scan as a service, through its own ESP32 connection, so the pump,
-flush and centrifuge services keep working during a scan. Don't run `ms` while `steppers_node`
+`steppers_node` runs homing and the scan as services, through its own ESP32 connection, so the
+pump, flush and centrifuge services keep working meanwhile. Don't run `ms` while `steppers_node`
 is up: only one program can open the port.
 
 ```bash
 ros2 run astrobiology_actuators steppers_node --ros-args -p port:=/dev/ttyUSB0
+ros2 service call /astrobiology/gantry/home astrobiology_interfaces/srv/Command
 ros2 service call /astrobiology/gantry/scan astrobiology_interfaces/srv/Command
 ros2 service call /astrobiology/gantry/stop std_srvs/srv/Trigger
 ```
 
 | Service | Type | What it does |
 |---|---|---|
+| `/astrobiology/gantry/home` | `Command` | Homes Z, then Y, then X (`g28`); X/Y/Z = 0 afterwards. Replies at once; `expected_s` is an upper bound from `travel_max`. The log says `gantry homed` when it finishes |
 | `/astrobiology/gantry/scan` | `Command` | Starts the full scan (home, 20 points, pictures, back to 0/0/0) in the background. Replies at once: `success`, the CSV path in `message`, and `expected_s` (rough time, not counting homing) |
-| `/astrobiology/gantry/stop` | `Trigger` | Decelerates X/Y/Z and ends the scan; the CSV keeps the points done so far. No estop, so no re-home is needed |
+| `/astrobiology/gantry/stop` | `Trigger` | Decelerates X/Y/Z and ends the scan or homing. A stopped scan keeps its CSV and needs no re-home (no estop); stopped homing leaves the position unset, so home again |
 
 - Progress (`#3/20 (0,0) lvl 3 ...`) and the final `gantry scan done` line are in the node's log.
-- The scan is refused if one is already running, a gantry axis is busy, the node has no serial
-  connection (`dry_run`), `calibrated` is false, or pictures are on and ffmpeg or the camera is missing.
-- While a scan runs, `x_gantry/move`, `y_gantry/move` and `z_gantry/move` reply `busy: gantry scan running`.
+- Homing and the scan are refused while either is in progress, while a gantry axis is busy, or
+  if the node has no serial connection (`dry_run`). The scan is also refused if `calibrated` is
+  false, or pictures are on and ffmpeg or the camera is missing.
+- While homing or a scan runs, `x_gantry/move`, `y_gantry/move` and `z_gantry/move` reply
+  `busy: gantry homing in progress` / `busy: gantry scan in progress`.
 - If a move fails (a timeout or a firmware error), the node sends `!` like the CLI, so re-home before the next run.
 
 Node parameters:

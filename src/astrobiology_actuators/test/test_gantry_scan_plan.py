@@ -415,3 +415,9 @@ def test_queued_serial_drives_gantry():
     assert gantry.pos() == {'x': 1.0, 'y': 2.0, 'z': 3.0}
     assert written == [b'\n', b'pos\n']
     gantry.close()   # no-op on the shared port
+
+
+def test_estimate_home_s_is_search_plus_touch_per_axis():
+    cfg = make_cfg()   # travel_max 100, 100, 50 mm
+    expected = (100 + 100 + 50) / gantry_scan.HOME_FAST_MM_S + 3 * gantry_scan.HOME_TOUCH_S
+    assert gantry_scan.estimate_home_s(cfg) == pytest.approx(expected)

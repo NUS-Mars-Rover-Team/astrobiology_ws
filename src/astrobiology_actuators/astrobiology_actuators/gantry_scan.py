@@ -583,6 +583,15 @@ def estimate_scan_s(cfg, points, return_home=True):
     return total
 
 
+HOME_FAST_MM_S = 10000 / STEPS_PER_MM   # firmware HOME_FAST search speed (steps/s)
+HOME_TOUCH_S = 3.0                        # per axis: back off, then slow re-touch
+
+
+def estimate_home_s(cfg):
+    """Upper bound for homing all axes: each starts at most travel_max from its switch."""
+    return sum(cfg.travel_max[axis] / HOME_FAST_MM_S + HOME_TOUCH_S for axis in 'xyz')
+
+
 def prepare_scan(path):
     """Load and validate a config for a live scan: (cfg, points).
 

@@ -184,6 +184,7 @@ to the stepper ESP32 directly, so stop `steppers_node` first.
 `steppers_node` also runs the scan as a service, sharing its port:
 
 ```bash
+ros2 service call /astrobiology/gantry/home astrobiology_interfaces/srv/Command
 ros2 service call /astrobiology/gantry/scan astrobiology_interfaces/srv/Command
 ros2 service call /astrobiology/gantry/stop std_srvs/srv/Trigger
 ```
@@ -241,8 +242,9 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/halogen/set` | SetBool | Halogen lamp on/off |
 | `/astrobiology/drill/start` | Trigger | Start the drill (`b`) |
 | `/astrobiology/drill/stop` | Trigger | Stop the drill (`s`) |
+| `/astrobiology/gantry/home` | Command | Home the gantry, Z then Y then X (`steppers_node`); replies at once |
 | `/astrobiology/gantry/scan` | Command | Start the gantry grid scan (`steppers_node`); replies at once |
-| `/astrobiology/gantry/stop` | Trigger | Stop the gantry scan (decelerates X/Y/Z) |
+| `/astrobiology/gantry/stop` | Trigger | Stop the gantry scan or homing (decelerates X/Y/Z) |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
 

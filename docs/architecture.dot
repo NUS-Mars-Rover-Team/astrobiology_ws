@@ -139,6 +139,10 @@ digraph astrobiology {
             label="/astrobiology/\nz_gantry/stop\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
         ];
+        gantry_home [
+            label="/astrobiology/\ngantry/home\n[Command]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
         gantry_scan [
             label="/astrobiology/\ngantry/scan\n[Command]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
@@ -210,6 +214,7 @@ digraph astrobiology {
     steppers_node -> y_gantry_stop   [label="server" color="#6A1B9A"];
     steppers_node -> z_gantry_move   [label="server" color="#6A1B9A"];
     steppers_node -> z_gantry_stop   [label="server" color="#6A1B9A"];
+    steppers_node -> gantry_home [label="server" color="#6A1B9A"];
     steppers_node -> gantry_scan [label="server" color="#6A1B9A"];
     steppers_node -> gantry_stop [label="server" color="#6A1B9A"];
 

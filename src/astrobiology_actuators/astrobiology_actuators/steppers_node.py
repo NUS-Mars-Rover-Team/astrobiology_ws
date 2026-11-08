@@ -3,10 +3,10 @@
 Services use StepperMove: the caller passes steps, speed_hz, accel_hz2
 which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
 
-It also runs the gantry grid scan (gantry_scan.py) as a service:
-/astrobiology/gantry/scan starts it in the background and
-/astrobiology/gantry/stop ends it.  The scan shares this node's serial
-port; gantry move services are rejected while it runs.
+It also runs gantry jobs in the background, sharing this node's serial port:
+/astrobiology/gantry/home homes Z, Y, X; /astrobiology/gantry/scan runs the
+grid scan (gantry_scan.py); /astrobiology/gantry/stop ends either.  Gantry
+move services are rejected while a job runs.
 """
 
 from datetime import datetime
@@ -77,11 +77,11 @@ class SteppersNode(Node):
         self._ser = None
         self._connected = False
 
-        # Gantry scan: the thread while one runs, and the queue the read
-        # loop copies every ESP32 line into for it
-        self._scan_thread = None
-        self._scan_lines = None
-        self._scan_stop = threading.Event()
+        # Gantry job: 'homing' or 'scan' while one runs, and the queue the
+        # read loop copies every ESP32 line into for it
+        self._gantry_job = None
+        self._gantry_lines = None
+        self._gantry_stop = threading.Event()
 
         if not self._dry_run:
             self._open_serial()
@@ -99,10 +99,12 @@ class SteppersNode(Node):
                 lambda req, resp, n=name: self._on_stop(req, resp, n),
                 callback_group=cb,
             )
+        self.create_service(Command, 'astrobiology/gantry/home',
+                            self._on_home, callback_group=cb)
         self.create_service(Command, 'astrobiology/gantry/scan',
                             self._on_scan, callback_group=cb)
         self.create_service(Trigger, 'astrobiology/gantry/stop',
-                            self._on_scan_stop, callback_group=cb)
+                            self._on_gantry_stop, callback_group=cb)
 
         # Background serial read thread
         if self._ser:
@@ -137,9 +139,9 @@ class SteppersNode(Node):
 
     def _on_move(self, req, resp, service_name):
         with self._lock:
-            if service_name in GANTRY and self._scan_thread is not None:
+            if service_name in GANTRY and self._gantry_job is not None:
                 resp.success = False
-                resp.message = 'busy: gantry scan running'
+                resp.message = f'busy: gantry {self._gantry_job} in progress'
                 return resp
             if self._busy[service_name]:
                 resp.success = False
@@ -166,14 +168,25 @@ class SteppersNode(Node):
         resp.message = f'stop {cmd_name}'
         return resp
 
+    def _on_home(self, req, resp):
+        resp.success = False
+        resp.expected_s = 0.0
+        if not self._start_gantry_job('homing', self._home, (), resp):
+            return resp
+        try:   # the scan config's travel limits give an upper bound
+            cfg = gs.ScanConfig.from_yaml(self._scan_config_path())
+            resp.expected_s = float(gs.estimate_home_s(cfg))
+        except (gs.ScanConfigError, OSError, yaml.YAMLError):
+            pass
+        resp.success = True
+        resp.message = 'homing Z, then Y, then X'
+        self.get_logger().info(f'gantry homing: Z, then Y, then X (up to ~{resp.expected_s:.0f} s)')
+        return resp
+
     def _on_scan(self, req, resp):
         resp.success = False
         resp.expected_s = 0.0
-        if self._ser is None:
-            resp.message = 'no serial connection to the ESP32 (dry_run, or the port failed to open)'
-            return resp
-
-        path = self.get_parameter('scan_config').value or str(gs.default_config_path())
+        path = self._scan_config_path()
         try:
             cfg, points = gs.prepare_scan(path)
         except (gs.ScanConfigError, OSError, yaml.YAMLError) as e:
@@ -181,18 +194,8 @@ class SteppersNode(Node):
             return resp
         out = (Path(self.get_parameter('scan_dir').value).expanduser()
                / f'gantry_scan_{datetime.now():%Y%m%d_%H%M%S}.csv')
-
-        with self._lock:
-            busy = [n for n in GANTRY if self._busy[n]]
-            if self._scan_thread is not None or busy:
-                resp.message = 'busy: ' + ('gantry scan running' if self._scan_thread
-                                           else ', '.join(busy))
-                return resp
-            self._scan_stop.clear()
-            self._scan_lines = queue.Queue()
-            self._scan_thread = threading.Thread(
-                target=self._run_scan, args=(cfg, points, out), daemon=True)
-            self._scan_thread.start()
+        if not self._start_gantry_job('scan', self._scan, (cfg, points, out), resp):
+            return resp
 
         resp.success = True
         resp.message = f'scanning {len(points)} points, logging to {out}'
@@ -201,43 +204,82 @@ class SteppersNode(Node):
                                f'(~{resp.expected_s:.0f} s plus homing)')
         return resp
 
-    def _on_scan_stop(self, req, resp):
-        if self._scan_thread is None:
+    def _on_gantry_stop(self, req, resp):
+        job = self._gantry_job
+        if job is None:
             resp.success = False
-            resp.message = 'no gantry scan running'
+            resp.message = 'no gantry scan or homing in progress'
             return resp
-        self._scan_stop.set()
+        self._gantry_stop.set()
         for axis in 'xyz':
             self._send_serial(stop_command(axis))
         resp.success = True
-        resp.message = 'stopping gantry scan (gantry decelerates, then halts)'
+        resp.message = f'stopping gantry {job} (gantry decelerates, then halts)'
         return resp
 
-    def _run_scan(self, cfg, points, out):
+    # -- Gantry jobs (homing, scan) ------------------------------------------
+
+    def _scan_config_path(self):
+        return self.get_parameter('scan_config').value or str(gs.default_config_path())
+
+    def _start_gantry_job(self, job, target, args, resp):
+        """Run target(gantry, *args) in the background unless the gantry is busy.
+
+        On refusal fills resp.message and returns False.
+        """
+        if self._ser is None:
+            resp.message = 'no serial connection to the ESP32 (dry_run, or the port failed to open)'
+            return False
+        with self._lock:
+            busy = [n for n in GANTRY if self._busy[n]]
+            if self._gantry_job is not None or busy:
+                resp.message = 'busy: ' + (f'gantry {self._gantry_job} in progress'
+                                           if self._gantry_job else ', '.join(busy))
+                return False
+            self._gantry_job = job
+            self._gantry_stop.clear()
+            self._gantry_lines = queue.Queue()
+            threading.Thread(target=self._run_gantry_job, args=(job, target, args),
+                             daemon=True).start()
+        return True
+
+    def _run_gantry_job(self, job, target, args):
         log = self.get_logger()
         gantry = None
         try:
-            gantry = gs.Gantry(ser=gs.QueuedSerial(self._write_raw, self._scan_lines),
+            gantry = gs.Gantry(ser=gs.QueuedSerial(self._write_raw, self._gantry_lines),
                                log=log.debug)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            with open(out, 'w', newline='') as f:
-                gs.run_scan(gantry, cfg, points, f,
-                            capture=gs.camera_capture(cfg) if cfg.camera_enabled else None,
-                            log=log.info, stop=self._scan_stop.is_set)
-            log.info(f'gantry scan done: {len(points)} points logged to {out}')
+            target(gantry, *args)
         except gs.GantryError as e:
-            if self._scan_stop.is_set():
-                log.warn(f'gantry scan stopped on request; {out} has the points so far')
+            if self._gantry_stop.is_set():
+                log.warn(f'gantry {job} stopped on request'
+                         + ('; position not set, home again' if job == 'homing' else ''))
             else:
-                log.error(f'gantry scan failed: {e}')
+                log.error(f'gantry {job} failed: {e}')
                 if gantry is not None:
                     gantry.close()   # sends ! (estop) if a move was in progress
         except OSError as e:
-            log.error(f'gantry scan failed: {e}')
+            log.error(f'gantry {job} failed: {e}')
         finally:
             with self._lock:
-                self._scan_lines = None
-                self._scan_thread = None
+                self._gantry_lines = None
+                self._gantry_job = None
+
+    def _home(self, gantry):
+        gantry.home()
+        # A stop cancels homing, but the firmware still ends with 'done g28'
+        if self._gantry_stop.is_set():
+            raise gs.GantryError('homing stopped')
+        self.get_logger().info('gantry homed: X/Y/Z = 0')
+
+    def _scan(self, gantry, cfg, points, out):
+        log = self.get_logger()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, 'w', newline='') as f:
+            gs.run_scan(gantry, cfg, points, f,
+                        capture=gs.camera_capture(cfg) if cfg.camera_enabled else None,
+                        log=log.info, stop=self._gantry_stop.is_set)
+        log.info(f'gantry scan done: {len(points)} points logged to {out}')
 
     # -- Serial I/O ----------------------------------------------------------
 
@@ -265,9 +307,9 @@ class SteppersNode(Node):
             if not line:
                 continue
 
-            scan_lines = self._scan_lines   # the running scan reads its replies here
-            if scan_lines is not None:
-                scan_lines.put(line)
+            gantry_lines = self._gantry_lines   # a running gantry job reads its replies here
+            if gantry_lines is not None:
+                gantry_lines.put(line)
 
             m = _DONE_RE.match(line)
             if m:
