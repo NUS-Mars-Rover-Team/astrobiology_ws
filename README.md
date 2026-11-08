@@ -8,6 +8,9 @@ ROS 2 (Humble) workspace for the NUS Mars Rover astrobiology payload. Controls s
 
 Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into [GraphvizOnline](https://dreampuf.github.io/GraphvizOnline).
 
+GUI developers: [`docs/gui_ros_wiring.md`](docs/gui_ros_wiring.md) maps every control on the four
+Science sub-tabs to the service or topic it should use.
+
 ## Hardware
 
 | Device | Interface | udev alias |
@@ -43,7 +46,7 @@ Each light is switched by a MOSFET.
 | Light | Firmware name | Pin |
 |-------|--------------|-----|
 | UVM LED | uvm | 12 |
-| UVC LED | uvc | 11 |
+| UVC LED (carousel UV) | uvc | 11 |
 | Laser | laser | 10 |
 | Halogen | halogen | 9 |
 
@@ -264,7 +267,7 @@ while gantry homing, the scan or the handover runs. Different axes can move at t
 | `/astrobiology/gantry/z/move` | MoveAxis | Gantry Z axis, mm, relative or absolute |
 | `/astrobiology/gantry/z/stop` | Trigger | Stop Z axis |
 | `/astrobiology/uvm/set` | SetBool | UVM LED on/off |
-| `/astrobiology/uvc/set` | SetBool | UVC LED on/off |
+| `/astrobiology/uvc/set` | SetBool | UVC LED (carousel UV) on/off |
 | `/astrobiology/laser/set` | SetBool | Laser on/off |
 | `/astrobiology/halogen/set` | SetBool | Halogen lamp on/off |
 | `/astrobiology/drill/start` | Trigger | Start the drill (`b`) |

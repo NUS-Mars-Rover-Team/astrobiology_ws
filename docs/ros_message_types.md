@@ -82,7 +82,7 @@ Move a stepper motor by a relative amount. Sent unchanged as `g1 <motor> <distan
 Servers: `/astrobiology/pump/move`, `/astrobiology/flush/move`, `/astrobiology/centrifuge/move` (the gantry axes use `MoveAxis`)
 
 ```bash
-# Pump forward 3200 steps
+# Pump forward 3200 pulses
 ros2 service call /astrobiology/pump/move \
   astrobiology_interfaces/srv/StepperMove \
   "{distance: 3200, speed: 800, accel: 400}"
@@ -91,7 +91,6 @@ ros2 service call /astrobiology/pump/move \
 ros2 service call /astrobiology/centrifuge/move \
   astrobiology_interfaces/srv/StepperMove \
   "{distance: 0.25, speed: 10, accel: 20}"
-
 ```
 
 ### `Dispense.srv`
@@ -212,6 +211,10 @@ ros2 service call /astrobiology/carousel/rotate \
 
 Switch the hybrid between carousel and centrifuge mode. Rejected while busy.
 
+> **Not implemented:** no node serves `/astrobiology/carousel/set_mode` yet. `carousel/rotate`
+> and `centrifuge/spin` work without a mode switch; they share the motor's busy flag, so a
+> rotate is refused while a spin runs.
+
 | | Field | Type | Description |
 |---|-------|------|-------------|
 | **Req** | `MODE_CAROUSEL` | `uint8` = 0 | Constant: carousel mode |
@@ -267,7 +270,7 @@ ros2 service call /astrobiology/move_motor \
 
 ### `std_srvs/srv/Trigger`
 
-No request fields. Used for stop commands and spectro zero-reference.
+No request fields. Used for stops, start/stop toggles, homing the carousel, the Raman dark and the spectro zero reference.
 
 | | Field | Type | Description |
 |---|-------|------|-------------|
@@ -275,7 +278,11 @@ No request fields. Used for stop commands and spectro zero-reference.
 | **Res** | `success` | `bool` | Whether it succeeded |
 | **Res** | `message` | `string` | Informational |
 
-Servers: `/astrobiology/pump/stop`, `/astrobiology/flush/stop`, `/astrobiology/centrifuge/stop`, `/astrobiology/carousel/home`, `/astrobiology/gantry/x/stop`, `/astrobiology/gantry/y/stop`, `/astrobiology/gantry/z/stop`, `/astrobiology/gantry/stop`, `/spectro/.../set_zero_reference`, `/spectro/.../clear_zero_reference`
+Servers:
+- `steppers_node`: `/astrobiology/pump/stop`, `/astrobiology/flush/stop`, `/astrobiology/centrifuge/stop`, `/astrobiology/carousel/home`, `/astrobiology/gantry/x/stop`, `/astrobiology/gantry/y/stop`, `/astrobiology/gantry/z/stop`, `/astrobiology/gantry/stop`
+- `drill_node`: `/astrobiology/drill/start`, `/astrobiology/drill/stop`
+- `raman_node`: `/raman/start`, `/raman/stop`, `/raman/set_dark`, `/raman/clear_dark`
+- `spectrum_node`: `/spectro/spectrum_node/set_zero_reference`, `/spectro/spectrum_node/clear_zero_reference`
 
 ```bash
 # Stop the pump
@@ -286,6 +293,9 @@ ros2 service call /spectro/spectrum_node/set_zero_reference std_srvs/srv/Trigger
 
 # Clear spectro zero reference
 ros2 service call /spectro/spectrum_node/clear_zero_reference std_srvs/srv/Trigger
+
+# Start the drill
+ros2 service call /astrobiology/drill/start std_srvs/srv/Trigger
 ```
 
 ### `std_srvs/srv/SetBool`
@@ -298,7 +308,7 @@ Toggle a light on or off.
 | **Res** | `success` | `bool` | Whether it succeeded |
 | **Res** | `message` | `string` | Informational |
 
-Servers: `/astrobiology/uvm/set`, `/astrobiology/uvc/set`, `/astrobiology/laser/set`, `/astrobiology/halogen/set`
+Servers (`lights_node`): `/astrobiology/uvm/set` (microscope UV), `/astrobiology/uvc/set` (carousel UV), `/astrobiology/laser/set` (532 nm Raman laser), `/astrobiology/halogen/set`
 
 ```bash
 # Turn laser on
@@ -322,9 +332,38 @@ Published by `spectrum_node` on `/spectro/preview/compressed`.
 ros2 topic echo /spectro/preview/compressed sensor_msgs/msg/CompressedImage
 ```
 
+### `geometry_msgs/msg/Point`
+
+Published by `steppers_node` on `/astrobiology/gantry/position`: the gantry position in **mm**
+(not metres), 2 Hz, and when a move finishes. Only meaningful after `/astrobiology/gantry/home`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `x` | `float64` | X in mm |
+| `y` | `float64` | Y in mm |
+| `z` | `float64` | Z in mm (0 = clear) |
+
+```bash
+ros2 topic echo /astrobiology/gantry/position
+```
+
+### `std_msgs/msg/Float32`
+
+Published by `steppers_node` on `/astrobiology/carousel/angle`: the carousel angle in degrees
+clockwise from the camera, 0–360. Only published after `/astrobiology/carousel/home`; stops after
+an estop or an ESP32 restart.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data` | `float32` | Angle in degrees |
+
+```bash
+ros2 topic echo /astrobiology/carousel/angle
+```
+
 ### `std_msgs/msg/Header`
 
-Embedded in `Spectrum`, `MotorStatus`, and `CompressedImage`.
+Embedded in `Spectrum`, `RamanSpectrum`, `MotorStatus`, and `CompressedImage`.
 
 | Field | Type | Description |
 |-------|------|-------------|
