@@ -5,8 +5,8 @@ import subprocess
 
 import pytest
 
-from astrobiology_actuators import microscope_scan
-from astrobiology_actuators.microscope_scan import (
+from astrobiology_actuators import gantry_scan
+from astrobiology_actuators.gantry_scan import (
     CSV_FIELDS,
     ScanConfig,
     ScanConfigError,
@@ -20,7 +20,7 @@ from astrobiology_actuators.microscope_scan import (
     validate,
 )
 
-CONFIG_YAML = Path(__file__).resolve().parents[1] / 'config' / 'microscope_scan.yaml'
+CONFIG_YAML = Path(__file__).resolve().parents[1] / 'config' / 'gantry_scan.yaml'
 
 
 def make_cfg(**overrides):
@@ -184,7 +184,7 @@ class FakeGantry:
 
 @pytest.fixture
 def no_settle(monkeypatch):
-    monkeypatch.setattr(microscope_scan.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(gantry_scan.time, 'sleep', lambda s: None)
 
 
 def test_run_scan_logs_every_point(no_settle):
@@ -227,18 +227,18 @@ def test_cli_refuses_uncalibrated_config(tmp_path, capsys):
     cfg_file = tmp_path / 'scan.yaml'
     cfg_file.write_text(CONFIG_YAML.read_text().replace('calibrated: true',
                                                         'calibrated: false'))
-    assert microscope_scan.main(['scan', '--config', str(cfg_file)]) == 1
+    assert gantry_scan.main(['scan', '--config', str(cfg_file)]) == 1
     assert 'calibrated is false' in capsys.readouterr().err
 
 
 def test_cli_dry_run_z_levels_override(capsys):
-    assert microscope_scan.main(['scan', '--dry-run', '--config', str(CONFIG_YAML),
+    assert gantry_scan.main(['scan', '--dry-run', '--config', str(CONFIG_YAML),
                                  '--z-levels', '0', '2']) == 0
     assert '8 points, Z levels 0, 2 mm' in capsys.readouterr().out
 
 
 def test_cli_rejects_levels_beyond_travel(capsys):
-    assert microscope_scan.main(['scan', '--dry-run', '--config', str(CONFIG_YAML),
+    assert gantry_scan.main(['scan', '--dry-run', '--config', str(CONFIG_YAML),
                                  '--z-levels', '0', '10']) == 1
     assert 'outside travel' in capsys.readouterr().err
 
@@ -285,7 +285,7 @@ class FakeRun:
 def test_capture_image_success_replaces_old_file(tmp_path, monkeypatch):
     path = tmp_path / 'test1.jpg'
     path.write_bytes(b'old')
-    monkeypatch.setattr(microscope_scan.subprocess, 'run', FakeRun())
+    monkeypatch.setattr(gantry_scan.subprocess, 'run', FakeRun())
     assert capture_image('/dev/video2', path, 5) is None
     assert path.read_bytes() == b'jpg'
 
@@ -300,7 +300,7 @@ def test_capture_image_success_replaces_old_file(tmp_path, monkeypatch):
 def test_capture_image_failures_return_a_reason(tmp_path, monkeypatch, fake, match):
     path = tmp_path / 'test1.jpg'
     path.write_bytes(b'stale picture from the last run')
-    monkeypatch.setattr(microscope_scan.subprocess, 'run', fake)
+    monkeypatch.setattr(gantry_scan.subprocess, 'run', fake)
     reason = capture_image('/dev/video2', path)
     assert reason is not None and match in reason
     assert not path.exists()
@@ -349,22 +349,22 @@ def _no_gantry(*args, **kwargs):
 
 
 def test_cli_missing_camera_is_refused_before_motion(monkeypatch, capsys):
-    monkeypatch.setattr(microscope_scan, 'Gantry', _no_gantry)
-    monkeypatch.setattr(microscope_scan.shutil, 'which', lambda name: '/usr/bin/ffmpeg')
-    assert microscope_scan.main(['scan', '--config', str(CONFIG_YAML),
+    monkeypatch.setattr(gantry_scan, 'Gantry', _no_gantry)
+    monkeypatch.setattr(gantry_scan.shutil, 'which', lambda name: '/usr/bin/ffmpeg')
+    assert gantry_scan.main(['scan', '--config', str(CONFIG_YAML),
                                  '--camera', '/dev/no_such_video']) == 1
     assert 'camera /dev/no_such_video not found' in capsys.readouterr().err
 
 
 def test_cli_no_images_skips_camera_checks(monkeypatch, capsys):
-    monkeypatch.setattr(microscope_scan, 'Gantry', _no_gantry)
+    monkeypatch.setattr(gantry_scan, 'Gantry', _no_gantry)
 
     def which(name):
         raise AssertionError('camera checks should be skipped')
 
-    monkeypatch.setattr(microscope_scan.shutil, 'which', which)
+    monkeypatch.setattr(gantry_scan.shutil, 'which', which)
     with pytest.raises(GantryReached):
-        microscope_scan.main(['scan', '--config', str(CONFIG_YAML), '--no-images'])
+        gantry_scan.main(['scan', '--config', str(CONFIG_YAML), '--no-images'])
     assert 'images: off' in capsys.readouterr().out
 
 
@@ -375,7 +375,7 @@ def test_run_scan_stops_when_asked(no_settle):
     points = scan_points(cfg)
     gantry = FakeGantry()
     out = io.StringIO()
-    with pytest.raises(microscope_scan.GantryError, match='scan stopped'):
+    with pytest.raises(gantry_scan.GantryError, match='scan stopped'):
         run_scan(gantry, cfg, points, out, log=lambda m: None,
                  stop=lambda: len(out.getvalue().splitlines()) > 3)
     # header + 3 points written before the stop
@@ -385,11 +385,11 @@ def test_run_scan_stops_when_asked(no_settle):
 def test_estimate_scan_s_counts_moves_settle_and_pictures():
     cfg = make_cfg(camera={'enabled': False}, settle_s=0.0)
     points = scan_points(cfg)
-    moves_only = microscope_scan.estimate_scan_s(cfg, points)
+    moves_only = gantry_scan.estimate_scan_s(cfg, points)
     assert moves_only > 0
-    with_settle = microscope_scan.estimate_scan_s(make_cfg(camera={'enabled': True}, settle_s=1.0),
+    with_settle = gantry_scan.estimate_scan_s(make_cfg(camera={'enabled': True}, settle_s=1.0),
                                                   points)
-    per_point = 1.0 + microscope_scan.CAPTURE_ESTIMATE_S
+    per_point = 1.0 + gantry_scan.CAPTURE_ESTIMATE_S
     assert with_settle == pytest.approx(moves_only + len(points) * per_point)
 
 
@@ -397,7 +397,7 @@ def test_prepare_scan_refuses_uncalibrated(tmp_path):
     cfg = tmp_path / 'scan.yaml'
     cfg.write_text(CONFIG_YAML.read_text().replace('calibrated: true', 'calibrated: false'))
     with pytest.raises(ScanConfigError, match='calibrated is false'):
-        microscope_scan.prepare_scan(cfg)
+        gantry_scan.prepare_scan(cfg)
 
 
 def test_queued_serial_drives_gantry():
@@ -410,7 +410,7 @@ def test_queued_serial_drives_gantry():
         if data == b'pos\n':
             lines.put('pos Z:3.0000 Y:2.0000 X:1.0000 C:0.0000 P:0 F:0')
 
-    gantry = microscope_scan.Gantry(ser=microscope_scan.QueuedSerial(write, lines),
+    gantry = gantry_scan.Gantry(ser=gantry_scan.QueuedSerial(write, lines),
                                     log=lambda m: None)
     assert gantry.pos() == {'x': 1.0, 'y': 2.0, 'z': 3.0}
     assert written == [b'\n', b'pos\n']

@@ -1,14 +1,14 @@
-# Microscope grid scan — 2026-11-02
+# Gantry grid scan — 2026-11-02
 
-`microscope_scan` homes the X/Y/Z gantry and moves the cache tray through a 2 × 2 grid at
+`gantry_scan` homes the X/Y/Z gantry and moves the cache tray through a 2 × 2 grid at
 several Z levels. At each point it stops, logs the position and takes a picture with the Pi
 camera (`test1.jpg` … `test20.jpg`). It also has commands for jogging the gantry by hand.
 
 The script talks to the stepper ESP32 directly over serial. It doesn't use ROS, so **`steppers_node`
 must be stopped while you use it**, because both open the same port.
 
-Source: [`src/astrobiology_actuators/astrobiology_actuators/microscope_scan.py`](../src/astrobiology_actuators/astrobiology_actuators/microscope_scan.py)
-Config: [`src/astrobiology_actuators/config/microscope_scan.yaml`](../src/astrobiology_actuators/config/microscope_scan.yaml)
+Source: [`src/astrobiology_actuators/astrobiology_actuators/gantry_scan.py`](../src/astrobiology_actuators/astrobiology_actuators/gantry_scan.py)
+Config: [`src/astrobiology_actuators/config/gantry_scan.yaml`](../src/astrobiology_actuators/config/gantry_scan.yaml)
 
 ## Status
 
@@ -31,7 +31,7 @@ Config: [`src/astrobiology_actuators/config/microscope_scan.yaml`](../src/astrob
 ```bash
 cd ~/astrobiology_ws
 git pull && colcon build --packages-select astrobiology_actuators && source install/setup.bash
-alias ms='ros2 run astrobiology_actuators microscope_scan --port /dev/ttyUSB1'
+alias ms='ros2 run astrobiology_actuators gantry_scan --port /dev/ttyUSB1'
 
 ms scan --dry-run      # check the points, moves and picture names; nothing moves
 ms scan                # home, scan all 20 points, return home
@@ -81,14 +81,14 @@ Options for `scan`:
 
 | Option | Effect |
 |---|---|
-| `--config FILE` | Use another config. Pass the source file to try changes without rebuilding: `--config ~/astrobiology_ws/src/astrobiology_actuators/config/microscope_scan.yaml` |
+| `--config FILE` | Use another config. Pass the source file to try changes without rebuilding: `--config ~/astrobiology_ws/src/astrobiology_actuators/config/gantry_scan.yaml` |
 | `--z-levels 0 1 2` | Override the Z levels (mm) for this run |
 | `--skip-home` | Don't home first; trust the current position |
 | `--no-return` | Stay at the last point instead of going back to 0/0/0 |
 | `--no-images` | Don't take pictures |
 | `--camera /dev/videoN` | Use another camera device |
 | `--image-dir DIR` | Save pictures somewhere other than `~/Pictures` |
-| `--out FILE.csv` | CSV path (default `scans/microscope_scan_<time>.csv` under the current folder) |
+| `--out FILE.csv` | CSV path (default `scans/gantry_scan_<time>.csv` under the current folder) |
 
 ## As a ROS service (steppers_node)
 
@@ -98,26 +98,26 @@ is up: only one program can open the port.
 
 ```bash
 ros2 run astrobiology_actuators steppers_node --ros-args -p port:=/dev/ttyUSB0
-ros2 service call /astrobiology/microscope/scan astrobiology_interfaces/srv/Command
-ros2 service call /astrobiology/microscope/stop std_srvs/srv/Trigger
+ros2 service call /astrobiology/gantry/scan astrobiology_interfaces/srv/Command
+ros2 service call /astrobiology/gantry/stop std_srvs/srv/Trigger
 ```
 
 | Service | Type | What it does |
 |---|---|---|
-| `/astrobiology/microscope/scan` | `Command` | Starts the full scan (home, 20 points, pictures, back to 0/0/0) in the background. Replies at once: `success`, the CSV path in `message`, and `expected_s` (rough time, not counting homing) |
-| `/astrobiology/microscope/stop` | `Trigger` | Decelerates X/Y/Z and ends the scan; the CSV keeps the points done so far. No estop, so no re-home is needed |
+| `/astrobiology/gantry/scan` | `Command` | Starts the full scan (home, 20 points, pictures, back to 0/0/0) in the background. Replies at once: `success`, the CSV path in `message`, and `expected_s` (rough time, not counting homing) |
+| `/astrobiology/gantry/stop` | `Trigger` | Decelerates X/Y/Z and ends the scan; the CSV keeps the points done so far. No estop, so no re-home is needed |
 
-- Progress (`#3/20 (0,0) lvl 3 ...`) and the final `microscope scan done` line are in the node's log.
+- Progress (`#3/20 (0,0) lvl 3 ...`) and the final `gantry scan done` line are in the node's log.
 - The scan is refused if one is already running, a gantry axis is busy, the node has no serial
   connection (`dry_run`), `calibrated` is false, or pictures are on and ffmpeg or the camera is missing.
-- While a scan runs, `x_gantry/move`, `y_gantry/move` and `z_gantry/move` reply `busy: microscope scan running`.
+- While a scan runs, `x_gantry/move`, `y_gantry/move` and `z_gantry/move` reply `busy: gantry scan running`.
 - If a move fails (a timeout or a firmware error), the node sends `!` like the CLI, so re-home before the next run.
 
 Node parameters:
 
 | Parameter | Default | |
 |---|---|---|
-| `scan_config` | `''` = the installed `microscope_scan.yaml` | Point it at the source file to try config changes without rebuilding |
+| `scan_config` | `''` = the installed `gantry_scan.yaml` | Point it at the source file to try config changes without rebuilding |
 | `scan_dir` | `~/scans` | Where the CSVs go |
 
 The CLI options (`--z-levels`, `--no-images`, ...) have no service equivalent; set them in the config.
@@ -162,7 +162,7 @@ frames so auto-exposure has settled. They go to `~/Pictures/test1.jpg` … `test
 
 ## Configuration
 
-`config/microscope_scan.yaml` (plain YAML, not ROS parameters):
+`config/gantry_scan.yaml` (plain YAML, not ROS parameters):
 
 | Key | Current value | Meaning |
 |---|---|---|
@@ -306,8 +306,8 @@ The tests use a fake serial port and a fake camera, so they need no hardware:
 cd src/astrobiology_actuators && python3 -m pytest test/ -q
 ```
 
-- `test_microscope_scan.py`: the serial link (`pos`, `home`, `move_to`, timeouts, emergency stop
+- `test_gantry_scan.py`: the serial link (`pos`, `home`, `move_to`, timeouts, emergency stop
   on exit) and the move order.
-- `test_microscope_scan_plan.py`: the point order, the target formula, validation, the dry run,
+- `test_gantry_scan_plan.py`: the point order, the target formula, validation, the dry run,
   `run_scan` with the CSV, picture capture, and the command-line checks.
 - `test_serial_commands.py`: command strings and reply parsing.

@@ -1,20 +1,20 @@
-"""Microscope grid scan over the X/Y/Z gantry.  No ROS imports.
+"""Grid scan over the X/Y/Z gantry.  No ROS imports.
 
 The CLI talks to the ESP32 stepper controller directly over serial, so
 steppers_node must NOT be running (it holds the same port).  steppers_node
-offers the same scan as a ROS service (/astrobiology/microscope/scan), driving
+offers the same scan as a ROS service (/astrobiology/gantry/scan), driving
 Gantry through its own port with QueuedSerial.
 
 Subcommands:
-    microscope_scan pos          print the gantry X/Y/Z position in mm
-    microscope_scan home [x y z] home onto the endstops (firmware order Z, Y, X)
-    microscope_scan goto --x 1   absolute move in mm (axes not given stay put);
+    gantry_scan pos              print the gantry X/Y/Z position in mm
+    gantry_scan home [x y z]     home onto the endstops (firmware order Z, Y, X)
+    gantry_scan goto --x 1       absolute move in mm (axes not given stay put);
                                  Z moves alone: first toward 0, last away from 0
-    microscope_scan scan             home, visit every point, log pos to a CSV
-                                     and grab a camera frame (test1.jpg ...)
-    microscope_scan scan --dry-run   print the scan points and moves (no port)
+    gantry_scan scan             home, visit every point, log pos to a CSV
+                                 and grab a camera frame (test1.jpg ...)
+    gantry_scan scan --dry-run   print the scan points and moves (no port)
 
-Scan geometry (config/microscope_scan.yaml): the gantry moves the cache tray
+Scan geometry (config/gantry_scan.yaml): the gantry moves the cache tray
 under a fixed microscope, so grid point p is under the lens when the gantry is at
     X, Y = microscope_offset - (grid_offset + p)
     Z    = z_offset + z level
@@ -60,7 +60,7 @@ MAX_ACCEL_MM_S2 = 1000000 / STEPS_PER_MM    # 312.5
 DEFAULT_SPEED_MM_S = 5.0
 DEFAULT_ACCEL_MM_S2 = 10.0
 
-CONFIG_NAME = 'microscope_scan.yaml'
+CONFIG_NAME = 'gantry_scan.yaml'
 CAPTURE_TIMEOUT_S = 20.0
 CAPTURE_ESTIMATE_S = 2.0   # typical time per picture, for estimate_scan_s
 
@@ -594,7 +594,7 @@ def prepare_scan(path):
     validate(cfg, points)
     if not cfg.calibrated:
         raise ScanConfigError(f'calibrated is false in {path}; check the offsets '
-                              'with microscope_scan scan --dry-run, then set it to true')
+                              'with gantry_scan scan --dry-run, then set it to true')
     if cfg.camera_enabled:
         check_camera(cfg)
     return cfg, points
@@ -664,7 +664,7 @@ def check_camera(cfg):
 
 
 def _cmd_scan(gantry, args):
-    out = args.out or Path('scans') / f'microscope_scan_{datetime.now():%Y%m%d_%H%M%S}.csv'
+    out = args.out or Path('scans') / f'gantry_scan_{datetime.now():%Y%m%d_%H%M%S}.csv'
     out.parent.mkdir(parents=True, exist_ok=True)
     print(f'logging to {out}')
     with open(out, 'w', newline='') as f:
@@ -684,8 +684,8 @@ def _axis(name):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog='microscope_scan',
-        description='Gantry jog tools and microscope grid scan (stop steppers_node first).')
+        prog='gantry_scan',
+        description='Gantry jog tools and gantry grid scan (stop steppers_node first).')
     parser.add_argument('--port', default=DEFAULT_PORT)
     parser.add_argument('--baud', type=int, default=DEFAULT_BAUD)
     parser.add_argument('-v', '--verbose', action='store_true',
@@ -701,7 +701,7 @@ def build_parser():
     p.add_argument('--speed', type=float, default=DEFAULT_SPEED_MM_S, help='mm/s')
     p.add_argument('--accel', type=float, default=DEFAULT_ACCEL_MM_S2, help='mm/s^2')
     p.set_defaults(func=_cmd_goto)
-    p = sub.add_parser('scan', help='run the microscope grid scan')
+    p = sub.add_parser('scan', help='run the gantry grid scan')
     p.add_argument('--config', type=Path, default=None,
                    help=f'scan config (default: installed {CONFIG_NAME})')
     p.add_argument('--dry-run', action='store_true',
@@ -713,7 +713,7 @@ def build_parser():
     p.add_argument('--z-levels', type=float, nargs='+', metavar='MM',
                    help='override z_levels_mm from the config, e.g. --z-levels 0 1 2')
     p.add_argument('--out', type=Path, default=None,
-                   help='CSV path (default: scans/microscope_scan_<time>.csv)')
+                   help='CSV path (default: scans/gantry_scan_<time>.csv)')
     p.add_argument('--no-images', action='store_true', help="don't take pictures")
     p.add_argument('--camera', metavar='DEVICE',
                    help='camera device, overriding the config (e.g. /dev/video0)')

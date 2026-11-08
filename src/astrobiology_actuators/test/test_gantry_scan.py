@@ -1,8 +1,8 @@
 import pytest
 
-from astrobiology_actuators import microscope_scan
+from astrobiology_actuators import gantry_scan
 
-from astrobiology_actuators.microscope_scan import Gantry, GantryError, build_parser
+from astrobiology_actuators.gantry_scan import Gantry, GantryError, build_parser
 
 
 class FakeSerial:
@@ -164,7 +164,7 @@ def test_move_to_skips_axes_already_there():
 
 
 def test_move_to_times_out_and_estops(monkeypatch):
-    monkeypatch.setattr(microscope_scan, 'MOVE_MARGIN_S', 0.0)
+    monkeypatch.setattr(gantry_scan, 'MOVE_MARGIN_S', 0.0)
     g, ser = make_gantry({
         'pos': POS_ORIGIN,
         'g1 x 0.01 30 300': ['ok x accepted']})     # never reports done
@@ -201,7 +201,7 @@ def test_move_to_rejects_before_sending(target, speed, accel):
 
 def test_cli_goto_requires_an_axis(capsys):
     with pytest.raises(SystemExit):
-        microscope_scan.main(['goto'])
+        gantry_scan.main(['goto'])
     assert 'at least one' in capsys.readouterr().err
 
 

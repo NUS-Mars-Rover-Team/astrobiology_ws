@@ -28,7 +28,7 @@ setup(
             'steppers_node = astrobiology_actuators.steppers_node:main',
             'lights_node = astrobiology_actuators.lights_node:main',
             'drill_node = astrobiology_actuators.drill_node:main',
-            'microscope_scan = astrobiology_actuators.microscope_scan:main',
+            'gantry_scan = astrobiology_actuators.gantry_scan:main',
         ],
     },
 )

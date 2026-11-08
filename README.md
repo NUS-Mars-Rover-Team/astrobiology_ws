@@ -50,7 +50,7 @@ Each light is switched by a MOSFET.
 
 | Package | Description |
 |---------|-------------|
-| `astrobiology_actuators` | Stepper motor node, science lights node, and the `microscope_scan` gantry/microscope tool |
+| `astrobiology_actuators` | Stepper motor node, science lights node, and the `gantry_scan` gantry/microscope tool |
 | `spectro_cam` | USB spectrometer node (capture, process, publish spectra) |
 | `astrobiology_interfaces` | Service definitions (`StepperMove.srv`, etc.) |
 | `astrobiology_msgs` | Legacy message/service definitions (`Spectrum.msg`, `MotorStatus.msg`) |
@@ -90,7 +90,7 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="e
 SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="XXXX", SYMLINK+="uno_drill", MODE="0666"
 
 # Pi CSI microscope camera (MMAL / bcm2835-v4l2), capture node only. /dev/videoN renumbers
-# when USB cameras are plugged in, so microscope_scan uses this link.
+# when USB cameras are plugged in, so gantry_scan uses this link.
 SUBSYSTEM=="video4linux", ATTR{name}=="camera0", ATTR{index}=="0", SYMLINK+="uv_microscope_cam", MODE="0660", GROUP="video"
 
 # Sonix spectroscope camera
@@ -174,9 +174,9 @@ ros2 service call /astrobiology/drill/stop std_srvs/srv/Trigger    # sends s (st
 The node's log shows the Arduino's reply (`arduino: Motor: BACKWARD`). The drill is stopped
 automatically when the node shuts down.
 
-### Microscope grid scan
+### Gantry grid scan
 
-`microscope_scan` homes the gantry, steps the cache tray through a 2 × 2 grid at five Z levels,
+`gantry_scan` homes the gantry, steps the cache tray through a 2 × 2 grid at five Z levels,
 logs each position to a CSV and saves a picture at each point (`~/Pictures/test1.jpg` …
 `test20.jpg`). It also has `pos` / `home` / `goto` commands for jogging the gantry. It talks
 to the stepper ESP32 directly, so stop `steppers_node` first.
@@ -184,17 +184,17 @@ to the stepper ESP32 directly, so stop `steppers_node` first.
 `steppers_node` also runs the scan as a service, sharing its port:
 
 ```bash
-ros2 service call /astrobiology/microscope/scan astrobiology_interfaces/srv/Command
-ros2 service call /astrobiology/microscope/stop std_srvs/srv/Trigger
+ros2 service call /astrobiology/gantry/scan astrobiology_interfaces/srv/Command
+ros2 service call /astrobiology/gantry/stop std_srvs/srv/Trigger
 ```
 
 ```bash
-ros2 run astrobiology_actuators microscope_scan --port /dev/ttyUSB1 scan --dry-run
-ros2 run astrobiology_actuators microscope_scan --port /dev/ttyUSB1 scan
+ros2 run astrobiology_actuators gantry_scan --port /dev/ttyUSB1 scan --dry-run
+ros2 run astrobiology_actuators gantry_scan --port /dev/ttyUSB1 scan
 ```
 
 Full guide (commands, config, coordinate model, viewing the pictures, troubleshooting):
-[`docs/microscope_scan.md`](docs/microscope_scan.md).
+[`docs/gantry_scan.md`](docs/gantry_scan.md).
 
 ### Stepper motor control
 
@@ -204,7 +204,7 @@ All motors use the `StepperMove` service (`steps`, `speed_hz`, `accel_hz2`):
 > but the current firmware reads the gantry axes in mm, mm/s and mm/s², and the centrifuge in
 > rev, RPM and RPM/s. The x/y/z gantry and centrifuge services therefore move by the wrong
 > amount, or are rejected as out of range. Until `steppers_node` is updated, move the gantry with
-> `microscope_scan goto`. Pump and flush are still raw pulses and unaffected.
+> `gantry_scan goto`. Pump and flush are still raw pulses and unaffected.
 
 ```bash
 # Move pump 3200 steps forward at 800 steps/s, 400 steps/s² accel
@@ -241,8 +241,8 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/halogen/set` | SetBool | Halogen lamp on/off |
 | `/astrobiology/drill/start` | Trigger | Start the drill (`b`) |
 | `/astrobiology/drill/stop` | Trigger | Stop the drill (`s`) |
-| `/astrobiology/microscope/scan` | Command | Start the microscope grid scan (`steppers_node`); replies at once |
-| `/astrobiology/microscope/stop` | Trigger | Stop the microscope scan (decelerates X/Y/Z) |
+| `/astrobiology/gantry/scan` | Command | Start the gantry grid scan (`steppers_node`); replies at once |
+| `/astrobiology/gantry/stop` | Trigger | Stop the gantry scan (decelerates X/Y/Z) |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
 
@@ -370,7 +370,7 @@ error line too long or invalid; discarded        Line contained control bytes (e
 ## Testing
 
 ```bash
-# Stepper motor, lights and microscope_scan tests (no ROS or hardware needed)
+# Stepper motor, lights and gantry_scan tests (no ROS or hardware needed)
 cd src/astrobiology_actuators && python3 -m pytest test/ -v
 
 # Spectrometer processing tests
