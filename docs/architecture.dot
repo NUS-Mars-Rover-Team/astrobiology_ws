@@ -32,6 +32,10 @@ digraph astrobiology {
             label="Arduino\nDrill\n(LAdrill.ino)"
             shape=box3d style=filled fillcolor="#FFE0B2"
         ];
+        btc100 [
+            label="B&W Tek BTC100\nRaman spectrometer\n(RS232 / CH340)"
+            shape=box3d style=filled fillcolor="#FFE0B2"
+        ];
         spectro_cam [
             label="Sonix\nSpectroscope\nCamera"
             shape=box3d style=filled fillcolor="#FFE0B2"
@@ -57,6 +61,10 @@ digraph astrobiology {
             label="drill_node\n(astrobiology_actuators)"
             shape=ellipse style=filled fillcolor="#BBDEFB"
         ];
+        raman_node [
+            label="raman_node\n(raman_spectrometer)"
+            shape=ellipse style=filled fillcolor="#BBDEFB"
+        ];
         spectrum_node [
             label="spectrum_node\n(spectro_cam)"
             shape=ellipse style=filled fillcolor="#BBDEFB"
@@ -80,6 +88,10 @@ digraph astrobiology {
         ];
         preview_topic [
             label="/spectro/preview/\ncompressed\n[CompressedImage]"
+            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
+        ];
+        raman_topic [
+            label="/raman/\nspectrum\n[RamanSpectrum]"
             shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
         ];
         gantry_position_topic [
@@ -186,6 +198,23 @@ digraph astrobiology {
             shape=hexagon style=filled fillcolor="#E1BEE7"
         ];
 
+        raman_start [
+            label="/raman/start\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+        raman_stop [
+            label="/raman/stop\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+        raman_set_dark [
+            label="/raman/set_dark\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+        raman_clear_dark [
+            label="/raman/clear_dark\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+
         set_zero [
             label="/spectro/.../\nset_zero_reference\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
@@ -200,10 +229,16 @@ digraph astrobiology {
     esp_steppers -> steppers_node      [label="serial\n/dev/esp_steppers\n115200\ng1 protocol" style=bold color="#E65100"];
     esp_lights   -> lights_node    [label="serial\n/dev/esp_lights\n9600\n<light> on|off" style=bold color="#E65100"];
     arduino_drill -> drill_node    [label="serial\n/dev/uno_drill\n9600\nb | s" style=bold color="#E65100"];
+    btc100       -> raman_node     [label="serial\n/dev/raman_spectroscope\n115200 (K0)" style=bold color="#E65100"];
     spectro_cam  -> spectrum_node  [label="V4L2\n/dev/spectroscope" style=bold color="#E65100"];
 
     // ── Edges: nodes → topics ────────────────────────────────
     spectrum_node -> spectrum_topic [label="pub" color="#2E7D32"];
+    raman_node -> raman_topic [label="pub" color="#2E7D32"];
+    raman_node -> raman_start [label="server" color="#6A1B9A"];
+    raman_node -> raman_stop [label="server" color="#6A1B9A"];
+    raman_node -> raman_set_dark [label="server" color="#6A1B9A"];
+    raman_node -> raman_clear_dark [label="server" color="#6A1B9A"];
     spectrum_node -> preview_topic  [label="pub" color="#2E7D32"];
     steppers_node -> gantry_position_topic [label="pub" color="#2E7D32"];
 

@@ -27,6 +27,27 @@ Published by `spectrum_node` on `/spectro/spectrum`, subscribed by `spectrum_plo
 ros2 topic echo /spectro/spectrum astrobiology_msgs/msg/Spectrum
 ```
 
+### `astrobiology_msgs/msg/RamanSpectrum`
+
+Published by `raman_node` on `/raman/spectrum` after every scan while started (`/raman/start`).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `header` | `std_msgs/Header` | Timestamp + frame ID (`raman`) |
+| `raman_shift` | `float32[]` | Raman shift in cm⁻¹ per pixel: `1e7/laser_nm - 1e7/wavelength`; negative below the laser line |
+| `wavelengths` | `float32[]` | Wavelength in nm per pixel (cubic calibration) |
+| `counts` | `float32[]` | Detector counts, minus the dark when `dark_subtracted` |
+| `dark_subtracted` | `bool` | Whether a dark (`/raman/set_dark`) was subtracted |
+| `laser_nm` | `float32` | Excitation wavelength used for `raman_shift` (532) |
+| `integration_ms` | `uint32` | Integration time of this scan |
+| `averages` | `uint32` | Scans averaged by the unit |
+| `raw_max` | `uint32` | Largest count before dark subtraction; ≥ 65000 is saturated |
+| `saturated_pixels` | `uint32` | Pixels at or above 65000 |
+
+```bash
+ros2 topic echo /raman/spectrum --field raw_max
+```
+
 ### `astrobiology_msgs/msg/MotorStatus`
 
 Published by `motor_bridge` on `/astrobiology/motor_status`.

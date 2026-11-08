@@ -1,0 +1,16 @@
+# Parameters for raman_spectrometer/raman_node (B&W Tek BTC100-2S).
+# integration_ms and averages can be changed live:
+#   ros2 param set /raman/raman_node integration_ms 1000
+# (changing either clears the stored dark; take a new one with the laser off).
+/**:
+  ros__parameters:
+    port: /dev/raman_spectroscope   # udev link to the CH340 RS232 adapter
+    integration_ms: 100             # 50-65000 ms per scan
+    averages: 1                     # scans averaged in the unit per published spectrum
+    pixels: 2048
+    laser_nm: 532.0                 # CubeRaman excitation laser (550 nm longpass filter)
+    # Wavelength calibration lambda(p) = C0 + C1 p + C2 p^2 + C3 p^3 [nm]: CFL lines,
+    # 2026-10-22, ~355-627 nm.  Recalibrate if the input optics change.
+    coeffs: [355.3, 0.1864838, -2.323853e-05, -1.515545e-09]
+    frame_id: raman
+    autostart: false                # true = scan from start-up without calling start

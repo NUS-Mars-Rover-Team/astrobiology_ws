@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>raman_spectrometer</name>
+  <version>0.1.0</version>
+  <description>
+    Node for the B&amp;W Tek BTC100-2S Raman spectrometer (RS232). Scans while started and
+    publishes astrobiology_msgs/RamanSpectrum with a Raman shift axis for the 532 nm laser.
+  </description>
+  <maintainer email="chengxi03@gmail.com">CS Seow</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>astrobiology_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

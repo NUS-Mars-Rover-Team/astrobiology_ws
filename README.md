@@ -16,6 +16,7 @@ Render: `dot -Tpng docs/architecture.dot -o docs/architecture.png` or paste into
 | Arduino science lights + drill controller (`firmware/LEDdrill.ino`) | Serial 9600 (`<light> on\|off`) | `/dev/esp_lights` |
 | Arduino drill controller (`firmware/LAdrill.ino`) | Serial 9600 (single chars `b`/`s`) | `/dev/uno_drill` |
 | Sonix spectroscope camera | V4L2 (1920x1080 MJPG) | `/dev/spectroscope` |
+| B&W Tek BTC100-2S Raman spectrometer (RS232 via CH340) | Serial, 9600 at power-on; `raman_node` switches it to 115200 (`K0`) | `/dev/raman_spectroscope` |
 | Microscope camera (Pi CSI, MMAL `bcm2835-v4l2`) | V4L2 | `/dev/uv_microscope_cam` |
 
 ### ESP32 Motor Channels
@@ -52,6 +53,7 @@ Each light is switched by a MOSFET.
 |---------|-------------|
 | `astrobiology_actuators` | Stepper motor node, science lights node, and the `gantry_scan` gantry/microscope tool |
 | `spectro_cam` | USB spectrometer node (capture, process, publish spectra) |
+| `raman_spectrometer` | BTC100 Raman spectrometer node (`raman_node`: scan while started, publish Raman spectra) |
 | `astrobiology_interfaces` | Service definitions (`StepperMove.srv`, etc.) |
 | `astrobiology_msgs` | Legacy message/service definitions (`Spectrum.msg`, `MotorStatus.msg`) |
 | `astrobiology_bringup` | Legacy motor bridge node |
@@ -133,6 +135,14 @@ This starts `drill_node` with 2 Trigger services (`drill/start`, `drill/stop`).
 ```bash
 ros2 launch spectro_cam spectro_cam.launch.py
 ```
+
+### Launch Raman spectrometer
+
+```bash
+ros2 launch raman_spectrometer raman.launch.py          # port:=/dev/ttyUSBn to override
+```
+
+This starts `raman_node` in namespace `raman`, stopped. See [Raman spectra](#raman-spectra).
 
 ### Live spectrum plot (diagnostic)
 
@@ -256,6 +266,10 @@ while gantry homing, the scan or the handover runs. Different axes can move at t
 | `/astrobiology/gantry/stop` | Trigger | Stop gantry homing, the scan or the handover (decelerates X/Y/Z) |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
+| `/raman/start` | Trigger | Start scanning the Raman spectrometer back to back |
+| `/raman/stop` | Trigger | Stop scanning (the scan in progress is abandoned) |
+| `/raman/set_dark` | Trigger | Use the latest raw scan as the dark (take it with the laser off) |
+| `/raman/clear_dark` | Trigger | Stop subtracting the dark |
 
 ### Gantry position topic
 
@@ -268,6 +282,35 @@ gantry is homed.
 ```bash
 ros2 topic echo /astrobiology/gantry/position
 ```
+
+### Raman spectra
+
+`raman_node` (package `raman_spectrometer`) drives the B&W Tek BTC100. While started it scans
+back to back and publishes `/raman/spectrum` (`astrobiology_msgs/msg/RamanSpectrum`, reliable
+QoS) after each scan: `counts` per detector pixel with `raman_shift` (cm⁻¹) and `wavelengths`
+(nm) axes. Plot `raman_shift` against `counts`; the 550 nm longpass filter limits the useful
+range to about 600–2850 cm⁻¹. Each scan takes the integration time × averages plus ~1 s of
+transfer.
+
+```bash
+ros2 service call /astrobiology/laser/set std_srvs/srv/SetBool "{data: false}"   # laser off
+ros2 service call /raman/start std_srvs/srv/Trigger
+ros2 service call /raman/set_dark std_srvs/srv/Trigger        # after a scan with the laser off
+ros2 service call /astrobiology/laser/set std_srvs/srv/SetBool "{data: true}"    # laser on (Class 3B: goggles)
+ros2 param set /raman/raman_node integration_ms 1000          # live; clears the dark
+ros2 service call /raman/stop std_srvs/srv/Trigger
+```
+
+- The node never switches the 532 nm laser; that is `lights_node`'s `/astrobiology/laser/set`.
+- `raw_max` ≥ 65000 or `saturated_pixels` > 0 means clipped: lower `integration_ms` or the laser power.
+- The dark is only subtracted while `integration_ms`/`averages` match the ones it was taken with;
+  changing either clears it.
+- Parameters are in `src/raman_spectrometer/config/raman.yaml`: `port`, `integration_ms`,
+  `averages`, `laser_nm` (532), the wavelength calibration `coeffs` (CFL lines, 2026-10-22,
+  ~355–627 nm) and `autostart`.
+- The standalone bench script (CSV capture, absorbance, live plot) is still
+  `~/Documents/NUSMRT/btc100_test/btc100_capture.py`. Stop `raman_node` before using it:
+  only one program can open the port.
 
 ### Spectrometer measurements
 
