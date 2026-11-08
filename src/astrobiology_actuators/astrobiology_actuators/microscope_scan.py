@@ -1,7 +1,9 @@
 """Microscope grid scan over the X/Y/Z gantry.  No ROS imports.
 
-Talks to the ESP32 stepper controller directly over serial, so steppers_node
-must NOT be running (it holds the same port).
+The CLI talks to the ESP32 stepper controller directly over serial, so
+steppers_node must NOT be running (it holds the same port).  steppers_node
+offers the same scan as a ROS service (/astrobiology/microscope/scan), driving
+Gantry through its own port with QueuedSerial.
 
 Subcommands:
     microscope_scan pos          print the gantry X/Y/Z position in mm
@@ -24,6 +26,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import queue
 import shutil
 import subprocess
 import sys
@@ -59,6 +62,7 @@ DEFAULT_ACCEL_MM_S2 = 10.0
 
 CONFIG_NAME = 'microscope_scan.yaml'
 CAPTURE_TIMEOUT_S = 20.0
+CAPTURE_ESTIMATE_S = 2.0   # typical time per picture, for estimate_scan_s
 
 # Reply prefixes (lower-cased) that mean the firmware rejected or aborted something
 _FAULT_PREFIXES = ('error', 'aborted', 'estop')
@@ -225,6 +229,31 @@ class Gantry:
             self.estop()
             self._log('motion interrupted: sent ! (estop); re-home before the next run')
         self._ser.close()
+
+
+class QueuedSerial:
+    """Serial stand-in for Gantry when another owner (steppers_node) holds the port.
+
+    Writes go to write(data); readline() returns the lines the owner put on
+    ``lines`` (a queue.Queue of stripped str), or b'' after 0.1 s like a port
+    timeout.  close() does nothing: the owner closes the real port.
+    """
+
+    def __init__(self, write, lines):
+        self._write = write
+        self._lines = lines
+
+    def write(self, data):
+        self._write(data)
+
+    def readline(self):
+        try:
+            return (self._lines.get(timeout=0.1) + '\n').encode()
+        except queue.Empty:
+            return b''
+
+    def close(self):
+        pass
 
 
 # -- Scan plan (pure, no serial) -----------------------------------------------
@@ -489,14 +518,15 @@ CSV_FIELDS = (
 
 
 def run_scan(gantry, cfg, points, csv_file, home=True, return_home=True,
-             capture=None, log=print):
+             capture=None, log=print, stop=None):
     """Move through every point, read pos after settling and log a CSV row.
 
     capture(n) -> (path, error), if given, is called at every point (n is
     1-based, in scan order) while the gantry is stationary; a failure is
     logged as a warning and the scan carries on.  csv_file is an open text
     file; rows are flushed as they are written so a Ctrl-C keeps everything
-    recorded so far.
+    recorded so far.  stop() is checked before every stop of the scan; once
+    it returns True the scan raises GantryError('scan stopped').
     """
     writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
     writer.writeheader()
@@ -504,6 +534,8 @@ def run_scan(gantry, cfg, points, csv_file, home=True, return_home=True,
         log('homing...')
         gantry.home()
     for label, p, groups in scan_moves(points, return_home):
+        if stop is not None and stop():
+            raise GantryError('scan stopped')
         for group in groups:
             gantry.move_to(group, cfg.speed_mm_s, cfg.accel_mm_s2)
         if p is None:
@@ -534,6 +566,38 @@ def run_scan(gantry, cfg, points, csv_file, home=True, return_home=True,
             + (f'  -> {Path(image).name}' if image else '')
             + (f'  WARNING off target by {error:.4f} mm'
                if error > cfg.pos_tolerance_mm else ''))
+
+
+def estimate_scan_s(cfg, points, return_home=True):
+    """Rough scan duration in s, excluding homing: moves, settling and pictures."""
+    total = 0.0
+    here = dict(HOME)
+    for _, p, groups in scan_moves(points, return_home):
+        for group in groups:
+            dist = max(abs(mm - here[axis]) for axis, mm in group.items())
+            if dist >= HALF_STEP_MM:
+                total += dist / cfg.speed_mm_s + cfg.speed_mm_s / cfg.accel_mm_s2
+            here.update(group)
+        if p is not None:
+            total += cfg.settle_s + (CAPTURE_ESTIMATE_S if cfg.camera_enabled else 0.0)
+    return total
+
+
+def prepare_scan(path):
+    """Load and validate a config for a live scan: (cfg, points).
+
+    Raises ScanConfigError (or OSError / yaml.YAMLError) if the scan can't run:
+    bad config, calibrated false, or no camera/ffmpeg while pictures are on.
+    """
+    cfg = ScanConfig.from_yaml(path)
+    points = scan_points(cfg)
+    validate(cfg, points)
+    if not cfg.calibrated:
+        raise ScanConfigError(f'calibrated is false in {path}; check the offsets '
+                              'with microscope_scan scan --dry-run, then set it to true')
+    if cfg.camera_enabled:
+        check_camera(cfg)
+    return cfg, points
 
 
 def default_config_path():
@@ -589,7 +653,7 @@ def _load_scan(args):
     return cfg, points
 
 
-def _check_camera(cfg):
+def check_camera(cfg):
     """Fail before any motion if pictures can't possibly be taken."""
     if shutil.which('ffmpeg') is None:
         raise ScanConfigError('ffmpeg not found (sudo apt install ffmpeg), or use --no-images')
@@ -682,7 +746,7 @@ def main(argv=None):
             return 1
         if args.cfg.camera_enabled:
             try:
-                _check_camera(args.cfg)
+                check_camera(args.cfg)
             except (OSError, ScanConfigError) as e:
                 print(f'error: {e}', file=sys.stderr)
                 return 1

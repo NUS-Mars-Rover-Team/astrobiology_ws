@@ -90,6 +90,38 @@ Options for `scan`:
 | `--image-dir DIR` | Save pictures somewhere other than `~/Pictures` |
 | `--out FILE.csv` | CSV path (default `scans/microscope_scan_<time>.csv` under the current folder) |
 
+## As a ROS service (steppers_node)
+
+`steppers_node` runs the same scan as a service, through its own ESP32 connection, so the pump,
+flush and centrifuge services keep working during a scan. Don't run `ms` while `steppers_node`
+is up: only one program can open the port.
+
+```bash
+ros2 run astrobiology_actuators steppers_node --ros-args -p port:=/dev/ttyUSB0
+ros2 service call /astrobiology/microscope/scan astrobiology_interfaces/srv/Command
+ros2 service call /astrobiology/microscope/stop std_srvs/srv/Trigger
+```
+
+| Service | Type | What it does |
+|---|---|---|
+| `/astrobiology/microscope/scan` | `Command` | Starts the full scan (home, 20 points, pictures, back to 0/0/0) in the background. Replies at once: `success`, the CSV path in `message`, and `expected_s` (rough time, not counting homing) |
+| `/astrobiology/microscope/stop` | `Trigger` | Decelerates X/Y/Z and ends the scan; the CSV keeps the points done so far. No estop, so no re-home is needed |
+
+- Progress (`#3/20 (0,0) lvl 3 ...`) and the final `microscope scan done` line are in the node's log.
+- The scan is refused if one is already running, a gantry axis is busy, the node has no serial
+  connection (`dry_run`), `calibrated` is false, or pictures are on and ffmpeg or the camera is missing.
+- While a scan runs, `x_gantry/move`, `y_gantry/move` and `z_gantry/move` reply `busy: microscope scan running`.
+- If a move fails (a timeout or a firmware error), the node sends `!` like the CLI, so re-home before the next run.
+
+Node parameters:
+
+| Parameter | Default | |
+|---|---|---|
+| `scan_config` | `''` = the installed `microscope_scan.yaml` | Point it at the source file to try config changes without rebuilding |
+| `scan_dir` | `~/scans` | Where the CSVs go |
+
+The CLI options (`--z-levels`, `--no-images`, ...) have no service equivalent; set them in the config.
+
 ## What a scan does
 
 The scan is a 2 × 2 grid at 1 mm spacing (4 X/Y positions) times 5 Z levels, so 20 points.

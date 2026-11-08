@@ -366,3 +366,52 @@ def test_cli_no_images_skips_camera_checks(monkeypatch, capsys):
     with pytest.raises(GantryReached):
         microscope_scan.main(['scan', '--config', str(CONFIG_YAML), '--no-images'])
     assert 'images: off' in capsys.readouterr().out
+
+
+# -- ROS service support (steppers_node) ---------------------------------------
+
+def test_run_scan_stops_when_asked(no_settle):
+    cfg = make_cfg(camera={'enabled': False})
+    points = scan_points(cfg)
+    gantry = FakeGantry()
+    out = io.StringIO()
+    with pytest.raises(microscope_scan.GantryError, match='scan stopped'):
+        run_scan(gantry, cfg, points, out, log=lambda m: None,
+                 stop=lambda: len(out.getvalue().splitlines()) > 3)
+    # header + 3 points written before the stop
+    assert len(out.getvalue().splitlines()) == 4
+
+
+def test_estimate_scan_s_counts_moves_settle_and_pictures():
+    cfg = make_cfg(camera={'enabled': False}, settle_s=0.0)
+    points = scan_points(cfg)
+    moves_only = microscope_scan.estimate_scan_s(cfg, points)
+    assert moves_only > 0
+    with_settle = microscope_scan.estimate_scan_s(make_cfg(camera={'enabled': True}, settle_s=1.0),
+                                                  points)
+    per_point = 1.0 + microscope_scan.CAPTURE_ESTIMATE_S
+    assert with_settle == pytest.approx(moves_only + len(points) * per_point)
+
+
+def test_prepare_scan_refuses_uncalibrated(tmp_path):
+    cfg = tmp_path / 'scan.yaml'
+    cfg.write_text(CONFIG_YAML.read_text().replace('calibrated: true', 'calibrated: false'))
+    with pytest.raises(ScanConfigError, match='calibrated is false'):
+        microscope_scan.prepare_scan(cfg)
+
+
+def test_queued_serial_drives_gantry():
+    import queue
+    lines = queue.Queue()
+    written = []
+
+    def write(data):
+        written.append(data)
+        if data == b'pos\n':
+            lines.put('pos Z:3.0000 Y:2.0000 X:1.0000 C:0.0000 P:0 F:0')
+
+    gantry = microscope_scan.Gantry(ser=microscope_scan.QueuedSerial(write, lines),
+                                    log=lambda m: None)
+    assert gantry.pos() == {'x': 1.0, 'y': 2.0, 'z': 3.0}
+    assert written == [b'\n', b'pos\n']
+    gantry.close()   # no-op on the shared port

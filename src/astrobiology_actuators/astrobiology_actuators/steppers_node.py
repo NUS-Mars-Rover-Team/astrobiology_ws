@@ -2,8 +2,16 @@
 
 Services use StepperMove: the caller passes steps, speed_hz, accel_hz2
 which map directly to the firmware command: g1 <motor> <steps> <speed> <accel>
+
+It also runs the microscope grid scan (microscope_scan.py) as a service:
+/astrobiology/microscope/scan starts it in the background and
+/astrobiology/microscope/stop ends it.  The scan shares this node's serial
+port; gantry move services are rejected while it runs.
 """
 
+from datetime import datetime
+from pathlib import Path
+import queue
 import re
 import threading
 import time
@@ -12,9 +20,11 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from std_srvs.srv import Trigger
+import yaml
 
-from astrobiology_interfaces.srv import StepperMove
+from astrobiology_interfaces.srv import Command, StepperMove
 
+from astrobiology_actuators import microscope_scan as ms
 from astrobiology_actuators.serial_commands import (
     estop_command,
     move_command,
@@ -30,6 +40,7 @@ MOTORS = {
     'y_gantry':   ('y', 'y'),
     'z_gantry':   ('z', 'z'),
 }
+GANTRY = ('x_gantry', 'y_gantry', 'z_gantry')
 
 # Firmware feedback patterns
 _DONE_RE = re.compile(r'^done\s+(\S+)\s+steps=(-?\d+)')
@@ -49,6 +60,8 @@ class SteppersNode(Node):
         self.declare_parameter('port', '/dev/esp_steppers')
         self.declare_parameter('baud', 115200)
         self.declare_parameter('dry_run', False)
+        self.declare_parameter('scan_config', '')       # '' = installed microscope_scan.yaml
+        self.declare_parameter('scan_dir', '~/scans')   # where scan CSVs are written
 
         self._dry_run = self.get_parameter('dry_run').value
         self._busy = {name: False for name in MOTORS}
@@ -63,6 +76,12 @@ class SteppersNode(Node):
         self._lock = threading.Lock()
         self._ser = None
         self._connected = False
+
+        # Microscope scan: the thread while one runs, and the queue the read
+        # loop copies every ESP32 line into for it
+        self._scan_thread = None
+        self._scan_lines = None
+        self._scan_stop = threading.Event()
 
         if not self._dry_run:
             self._open_serial()
@@ -80,6 +99,10 @@ class SteppersNode(Node):
                 lambda req, resp, n=name: self._on_stop(req, resp, n),
                 callback_group=cb,
             )
+        self.create_service(Command, 'astrobiology/microscope/scan',
+                            self._on_scan, callback_group=cb)
+        self.create_service(Trigger, 'astrobiology/microscope/stop',
+                            self._on_scan_stop, callback_group=cb)
 
         # Background serial read thread
         if self._ser:
@@ -114,6 +137,10 @@ class SteppersNode(Node):
 
     def _on_move(self, req, resp, service_name):
         with self._lock:
+            if service_name in GANTRY and self._scan_thread is not None:
+                resp.success = False
+                resp.message = 'busy: microscope scan running'
+                return resp
             if self._busy[service_name]:
                 resp.success = False
                 resp.message = 'busy'
@@ -139,15 +166,91 @@ class SteppersNode(Node):
         resp.message = f'stop {cmd_name}'
         return resp
 
+    def _on_scan(self, req, resp):
+        resp.success = False
+        resp.expected_s = 0.0
+        if self._ser is None:
+            resp.message = 'no serial connection to the ESP32 (dry_run, or the port failed to open)'
+            return resp
+
+        path = self.get_parameter('scan_config').value or str(ms.default_config_path())
+        try:
+            cfg, points = ms.prepare_scan(path)
+        except (ms.ScanConfigError, OSError, yaml.YAMLError) as e:
+            resp.message = f'{path}: {e}'
+            return resp
+        out = (Path(self.get_parameter('scan_dir').value).expanduser()
+               / f'microscope_scan_{datetime.now():%Y%m%d_%H%M%S}.csv')
+
+        with self._lock:
+            busy = [n for n in GANTRY if self._busy[n]]
+            if self._scan_thread is not None or busy:
+                resp.message = 'busy: ' + ('microscope scan running' if self._scan_thread
+                                           else ', '.join(busy))
+                return resp
+            self._scan_stop.clear()
+            self._scan_lines = queue.Queue()
+            self._scan_thread = threading.Thread(
+                target=self._run_scan, args=(cfg, points, out), daemon=True)
+            self._scan_thread.start()
+
+        resp.success = True
+        resp.message = f'scanning {len(points)} points, logging to {out}'
+        resp.expected_s = float(ms.estimate_scan_s(cfg, points))
+        self.get_logger().info(f'microscope scan: {resp.message} '
+                               f'(~{resp.expected_s:.0f} s plus homing)')
+        return resp
+
+    def _on_scan_stop(self, req, resp):
+        if self._scan_thread is None:
+            resp.success = False
+            resp.message = 'no microscope scan running'
+            return resp
+        self._scan_stop.set()
+        for axis in 'xyz':
+            self._send_serial(stop_command(axis))
+        resp.success = True
+        resp.message = 'stopping microscope scan (gantry decelerates, then halts)'
+        return resp
+
+    def _run_scan(self, cfg, points, out):
+        log = self.get_logger()
+        gantry = None
+        try:
+            gantry = ms.Gantry(ser=ms.QueuedSerial(self._write_raw, self._scan_lines),
+                               log=log.debug)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with open(out, 'w', newline='') as f:
+                ms.run_scan(gantry, cfg, points, f,
+                            capture=ms.camera_capture(cfg) if cfg.camera_enabled else None,
+                            log=log.info, stop=self._scan_stop.is_set)
+            log.info(f'microscope scan done: {len(points)} points logged to {out}')
+        except ms.GantryError as e:
+            if self._scan_stop.is_set():
+                log.warn(f'microscope scan stopped on request; {out} has the points so far')
+            else:
+                log.error(f'microscope scan failed: {e}')
+                if gantry is not None:
+                    gantry.close()   # sends ! (estop) if a move was in progress
+        except OSError as e:
+            log.error(f'microscope scan failed: {e}')
+        finally:
+            with self._lock:
+                self._scan_lines = None
+                self._scan_thread = None
+
     # -- Serial I/O ----------------------------------------------------------
+
+    def _write_raw(self, data):
+        if self._ser:
+            with self._lock:
+                self._ser.write(data)
 
     def _send_serial(self, cmd):
         if self._dry_run:
             self.get_logger().info(f'[dry_run] {cmd}')
             return
-        if self._ser:
-            with self._lock:
-                self._ser.write((cmd + '\n').encode())
+        self._write_raw((cmd + '\n').encode())
 
     def _read_loop(self):
         import serial as pyserial
@@ -161,6 +264,10 @@ class SteppersNode(Node):
                 return
             if not line:
                 continue
+
+            scan_lines = self._scan_lines   # the running scan reads its replies here
+            if scan_lines is not None:
+                scan_lines.put(line)
 
             m = _DONE_RE.match(line)
             if m:

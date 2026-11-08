@@ -181,6 +181,13 @@ logs each position to a CSV and saves a picture at each point (`~/Pictures/test1
 `test20.jpg`). It also has `pos` / `home` / `goto` commands for jogging the gantry. It talks
 to the stepper ESP32 directly, so stop `steppers_node` first.
 
+`steppers_node` also runs the scan as a service, sharing its port:
+
+```bash
+ros2 service call /astrobiology/microscope/scan astrobiology_interfaces/srv/Command
+ros2 service call /astrobiology/microscope/stop std_srvs/srv/Trigger
+```
+
 ```bash
 ros2 run astrobiology_actuators microscope_scan --port /dev/ttyUSB1 scan --dry-run
 ros2 run astrobiology_actuators microscope_scan --port /dev/ttyUSB1 scan
@@ -234,6 +241,8 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/astrobiology/halogen/set` | SetBool | Halogen lamp on/off |
 | `/astrobiology/drill/start` | Trigger | Start the drill (`b`) |
 | `/astrobiology/drill/stop` | Trigger | Stop the drill (`s`) |
+| `/astrobiology/microscope/scan` | Command | Start the microscope grid scan (`steppers_node`); replies at once |
+| `/astrobiology/microscope/stop` | Trigger | Stop the microscope scan (decelerates X/Y/Z) |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
 

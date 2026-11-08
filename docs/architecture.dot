@@ -139,6 +139,14 @@ digraph astrobiology {
             label="/astrobiology/\nz_gantry/stop\n[Trigger]"
             shape=hexagon style=filled fillcolor="#F3E5F5"
         ];
+        microscope_scan [
+            label="/astrobiology/\nmicroscope/scan\n[Command]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
+        microscope_stop [
+            label="/astrobiology/\nmicroscope/stop\n[Trigger]"
+            shape=hexagon style=filled fillcolor="#F3E5F5"
+        ];
 
         uvm_set [
             label="/astrobiology/\nuvm/set\n[SetBool]"
@@ -202,6 +210,8 @@ digraph astrobiology {
     steppers_node -> y_gantry_stop   [label="server" color="#6A1B9A"];
     steppers_node -> z_gantry_move   [label="server" color="#6A1B9A"];
     steppers_node -> z_gantry_stop   [label="server" color="#6A1B9A"];
+    steppers_node -> microscope_scan [label="server" color="#6A1B9A"];
+    steppers_node -> microscope_stop [label="server" color="#6A1B9A"];
 
     lights_node -> uvm_set      [label="server" color="#6A1B9A"];
     lights_node -> uvc_set      [label="server" color="#6A1B9A"];
