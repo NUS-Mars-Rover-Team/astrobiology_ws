@@ -248,6 +248,18 @@ ros2 service call /astrobiology/pump/stop std_srvs/srv/Trigger
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |
 
+### Gantry position topic
+
+`steppers_node` publishes `/astrobiology/gantry/position` (`geometry_msgs/msg/Point`, **mm**, not
+metres) at `position_rate_hz` (default 2 Hz; 0 turns polling off). It polls the ESP32 with `pos`
+while idle; during homing or a scan it publishes the positions those report instead. Nothing is
+published until the ESP32 has reported all three axes. The values count from power-on until the
+gantry is homed.
+
+```bash
+ros2 topic echo /astrobiology/gantry/position
+```
+
 ### Spectrometer measurements
 
 The wavelength calibration and the camera settings for the 5 V halogen lamp are in

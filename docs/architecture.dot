@@ -82,6 +82,10 @@ digraph astrobiology {
             label="/spectro/preview/\ncompressed\n[CompressedImage]"
             shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
         ];
+        gantry_position_topic [
+            label="/astrobiology/gantry/\nposition\n[Point, mm]"
+            shape=rectangle style="filled,rounded" fillcolor="#C8E6C9"
+        ];
     }
 
     // ── Services ─────────────────────────────────────────────
@@ -197,6 +201,7 @@ digraph astrobiology {
     // ── Edges: nodes → topics ────────────────────────────────
     spectrum_node -> spectrum_topic [label="pub" color="#2E7D32"];
     spectrum_node -> preview_topic  [label="pub" color="#2E7D32"];
+    steppers_node -> gantry_position_topic [label="pub" color="#2E7D32"];
 
     // ── Edges: topics → subscribers ──────────────────────────
     spectrum_topic -> spectrum_plot [label="sub" color="#2E7D32" style=dashed];

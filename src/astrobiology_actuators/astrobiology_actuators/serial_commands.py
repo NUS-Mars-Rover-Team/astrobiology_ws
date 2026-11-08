@@ -69,3 +69,25 @@ def parse_pos(line):
     if not _POS_LINE_RE.match(line):
         return None
     return {k.lower(): float(v) for k, v in _POS_FIELD_RE.findall(line)}
+
+
+_AXIS_END_RE = re.compile(r'^(?:done|stopped)\s+([xyz])\s+steps=-?\d+\s+pos=(-?\d+(?:\.\d+)?)')
+_HOMED_RE = re.compile(r'^homed\s+([xyz])\b')
+
+
+def gantry_position_update(line):
+    """Gantry positions (mm) reported by an ESP32 line, e.g. {'x': 12.5}; None if none.
+
+    'pos ...' gives X, Y and Z; 'done x ... pos=12.5' or 'stopped x ...' one axis;
+    'homed z ...' sets that axis to 0.
+    """
+    p = parse_pos(line)
+    if p is not None:
+        return {axis: p[axis] for axis in 'xyz' if axis in p}
+    m = _AXIS_END_RE.match(line)
+    if m:
+        return {m.group(1): float(m.group(2))}
+    m = _HOMED_RE.match(line)
+    if m:
+        return {m.group(1): 0.0}
+    return None

@@ -123,6 +123,7 @@ Node parameters:
 |---|---|---|
 | `scan_config` | `''` = the installed `gantry_scan.yaml` | Point it at the source file to try config changes without rebuilding |
 | `scan_dir` | `~/scans` | Where the CSVs go |
+| `position_rate_hz` | `2.0` | How often to poll `pos` for `/astrobiology/gantry/position` (`geometry_msgs/Point`, mm); 0 = off |
 
 The CLI options (`--z-levels`, `--no-images`, ...) have no service equivalent; set them in the config.
 

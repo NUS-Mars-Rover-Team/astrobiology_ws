@@ -7,6 +7,10 @@ It also runs gantry jobs in the background, sharing this node's serial port:
 /astrobiology/gantry/home homes Z, Y, X; /astrobiology/gantry/scan runs the
 grid scan (gantry_scan.py); /astrobiology/gantry/stop ends either.  Gantry
 move services are rejected while a job runs.
+
+/astrobiology/gantry/position (geometry_msgs/Point, mm) publishes the gantry
+X/Y/Z from every position the ESP32 reports; the node asks for it with 'pos'
+at position_rate_hz while no gantry job is running (a job reports its own).
 """
 
 from datetime import datetime
@@ -16,6 +20,7 @@ import re
 import threading
 import time
 
+from geometry_msgs.msg import Point
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
@@ -27,7 +32,9 @@ from astrobiology_interfaces.srv import Command, StepperMove
 from astrobiology_actuators import gantry_scan as gs
 from astrobiology_actuators.serial_commands import (
     estop_command,
+    gantry_position_update,
     move_command,
+    pos_command,
     stop_command,
 )
 
@@ -62,6 +69,7 @@ class SteppersNode(Node):
         self.declare_parameter('dry_run', False)
         self.declare_parameter('scan_config', '')       # '' = installed gantry_scan.yaml
         self.declare_parameter('scan_dir', '~/scans')   # where scan CSVs are written
+        self.declare_parameter('position_rate_hz', 2.0)   # 0 = don't poll 'pos'
 
         self._dry_run = self.get_parameter('dry_run').value
         self._busy = {name: False for name in MOTORS}
@@ -82,6 +90,10 @@ class SteppersNode(Node):
         self._gantry_job = None
         self._gantry_lines = None
         self._gantry_stop = threading.Event()
+
+        # Last gantry X/Y/Z (mm) the ESP32 reported; published once all three are known
+        self._position = {}
+        self._position_pub = self.create_publisher(Point, 'astrobiology/gantry/position', 10)
 
         if not self._dry_run:
             self._open_serial()
@@ -109,6 +121,9 @@ class SteppersNode(Node):
         # Background serial read thread
         if self._ser:
             threading.Thread(target=self._read_loop, daemon=True).start()
+            rate = self.get_parameter('position_rate_hz').value
+            if rate > 0:
+                self.create_timer(1.0 / rate, self._poll_position)
 
         mode = 'dry_run' if self._dry_run else 'live'
         self.get_logger().info(
@@ -281,6 +296,19 @@ class SteppersNode(Node):
                         log=log.info, stop=self._gantry_stop.is_set)
         log.info(f'gantry scan done: {len(points)} points logged to {out}')
 
+    # -- Gantry position -----------------------------------------------------
+
+    def _poll_position(self):
+        # A gantry job queries pos itself; extra replies would only add noise
+        if self._gantry_job is None:
+            self._send_serial(pos_command())
+
+    def _update_position(self, update):
+        self._position.update(update)
+        if len(self._position) == 3:
+            self._position_pub.publish(Point(
+                x=self._position['x'], y=self._position['y'], z=self._position['z']))
+
     # -- Serial I/O ----------------------------------------------------------
 
     def _write_raw(self, data):
@@ -310,6 +338,12 @@ class SteppersNode(Node):
             gantry_lines = self._gantry_lines   # a running gantry job reads its replies here
             if gantry_lines is not None:
                 gantry_lines.put(line)
+
+            update = gantry_position_update(line)
+            if update:
+                self._update_position(update)
+                if line.startswith('pos'):
+                    continue   # polled at position_rate_hz; don't log each reply
 
             m = _DONE_RE.match(line)
             if m:

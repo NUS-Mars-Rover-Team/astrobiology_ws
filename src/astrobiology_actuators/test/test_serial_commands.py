@@ -69,3 +69,13 @@ def test_done_re():
     m = DONE_RE.match('done x steps=3200 pos=1.0000')
     assert m.group(1) == 'x' and m.group(2) == '3200'
     assert DONE_RE.match('done g28') is None
+
+
+def test_gantry_position_update():
+    from astrobiology_actuators.serial_commands import gantry_position_update as upd
+    assert upd('pos Z:3.0000 Y:2.0000 X:1.0000 C:0.5000 P:0 F:0') == {'x': 1.0, 'y': 2.0, 'z': 3.0}
+    assert upd('done x steps=40000 pos=12.5000') == {'x': 12.5}
+    assert upd('stopped z steps=-100 pos=-0.0313') == {'z': -0.0313}
+    assert upd('homed y steps=0') == {'y': 0.0}
+    assert upd('done p steps=3200 pos=3200') is None      # not a gantry axis
+    assert upd('ok x accepted') is None
