@@ -12,11 +12,13 @@ steppers_node:
     handover_x_mm: 53.0
     handover_y_mm: 105.0
     # Dock lid (/astrobiology/gantry/lid): home all, X then Y go here (mm), then home X, home Y.
-    # Undock lid (/astrobiology/gantry/unlid): home all, X then Y go here, then home X.
+    # Undock lid (/astrobiology/gantry/unlid): home all, Y to unlid_y_start_mm, X to
+    # unlid_x_mm, Y to unlid_y_mm, then home X.
     # X 160 is beyond the scan's travel_max; it's the lid dock.
     lid_x_mm: 160.0
     lid_y_mm: 6.0
     unlid_x_mm: 160.0
+    unlid_y_start_mm: 6.0
     unlid_y_mm: 0.0
     # Dock pipes (/astrobiology/gantry/dock_pipes): home all, X, then Y, then Z go here (mm).
     # Z stays raised at pipes_z_mm until undocked; undock = /astrobiology/gantry/home

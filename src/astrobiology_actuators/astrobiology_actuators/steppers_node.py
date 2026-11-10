@@ -85,7 +85,7 @@ GANTRY = ('gantry/x', 'gantry/y', 'gantry/z')
 SEQUENCES = {
     'handover': (gs.handover_steps, ('handover_x_mm', 'handover_y_mm'), 'cache handover'),
     'lid': (gs.lid_steps, ('lid_x_mm', 'lid_y_mm'), 'lidding'),
-    'unlid': (gs.unlid_steps, ('unlid_x_mm', 'unlid_y_mm'), 'unlidding'),
+    'unlid': (gs.unlid_steps, ('unlid_x_mm', 'unlid_y_start_mm', 'unlid_y_mm'), 'unlidding'),
     'dock_pipes': (gs.dock_pipes_steps, ('pipes_x_mm', 'pipes_y_mm', 'pipes_z_mm'),
                    'pipe docking'),
 }
@@ -126,7 +126,8 @@ class SteppersNode(Node):
         self.declare_parameter('lid_x_mm', 160.0)         # dock lidding position
         self.declare_parameter('lid_y_mm', 6.0)
         self.declare_parameter('unlid_x_mm', 160.0)       # dock unlidding position
-        self.declare_parameter('unlid_y_mm', 0.0)
+        self.declare_parameter('unlid_y_start_mm', 6.0)   # Y before X goes out
+        self.declare_parameter('unlid_y_mm', 0.0)         # Y once X is out
         self.declare_parameter('pipes_x_mm', 104.0)       # pipe docking position
         self.declare_parameter('pipes_y_mm', 1.0)
         self.declare_parameter('pipes_z_mm', 47.0)

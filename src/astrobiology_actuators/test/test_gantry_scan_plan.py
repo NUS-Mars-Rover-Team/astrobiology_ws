@@ -450,10 +450,11 @@ def test_lid_sequence():
 
 def test_unlid_sequence():
     gantry = FakeGantry()
-    gantry_scan.run_sequence(gantry, 'unlidding', gantry_scan.unlid_steps(160.0, 0.0),
+    gantry_scan.run_sequence(gantry, 'unlidding', gantry_scan.unlid_steps(160.0, 6.0, 0.0),
                              log=lambda m: None)
     assert gantry.calls == [
-        ('home',), ('move', {'x': 160.0}), ('move', {'y': 0.0}), ('home', 'x'),
+        ('home',), ('move', {'y': 6.0}), ('move', {'x': 160.0}), ('move', {'y': 0.0}),
+        ('home', 'x'),
     ]
 
 
@@ -463,8 +464,8 @@ def test_sequence_logs_each_step():
                              log=lines.append)
     assert lines == ['lidding: home all', 'lidding: X to 160 mm', 'lidding: Y to 6 mm',
                      'lidding: home X', 'lidding: home Y']
-    assert (gantry_scan.describe_steps(gantry_scan.unlid_steps(160.0, 0.0))
-            == 'home all, X to 160 mm, Y to 0 mm, home X')
+    assert (gantry_scan.describe_steps(gantry_scan.unlid_steps(160.0, 6.0, 0.0))
+            == 'home all, Y to 6 mm, X to 160 mm, Y to 0 mm, home X')
 
 
 def test_sequence_stops_between_steps():

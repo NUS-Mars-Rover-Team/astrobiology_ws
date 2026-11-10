@@ -66,7 +66,7 @@ topic to subscribe to, the request, and what the rover does. Types come from
 |---|---|---|---|
 | Position X / Y / Z | subscribe `/astrobiology/gantry/position` | as on Imaging | |
 | DOCK / UNDOCK LID (on) | call `/astrobiology/gantry/lid` (`Command`) | empty | Home all, X → 160 mm, Y → 6 mm, home X, home Y |
-| DOCK / UNDOCK LID (off) | call `/astrobiology/gantry/unlid` (`Command`) | empty | Home all, X → 160 mm, Y → 0 mm, home X |
+| DOCK / UNDOCK LID (off) | call `/astrobiology/gantry/unlid` (`Command`) | empty | Home all, Y → 6 mm, X → 160 mm, Y → 0 mm, home X |
 | DOSING PUMP ON (+ Set DP) | call `/astrobiology/flush/dispense` (`Dispense`) | `{volume_ml: <Set DP>}` | Pumps that volume (firmware `f`), then stops. 0 < volume ≤ 50 mL. Switch the toggle off after `expected_s` |
 | DOSING PUMP OFF | call `/astrobiology/flush/stop` (`std_srvs/Trigger`) | empty | Stops the dosing pump |
 | EXTRACTION PUMP ON (+ Set EP) | call `/astrobiology/pump/dispense` (`Dispense`) | `{volume_ml: <Set EP>}` | Pumps that volume (firmware `p`), then stops |

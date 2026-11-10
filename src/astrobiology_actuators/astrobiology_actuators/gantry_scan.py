@@ -615,9 +615,10 @@ def lid_steps(x, y):
             ('home', ('x',)), ('home', ('y',))]
 
 
-def unlid_steps(x, y):
-    """Dock unlidding: home everything, X to x, Y to y, then home X."""
-    return [('home', ()), ('move', {'x': x}), ('move', {'y': y}), ('home', ('x',))]
+def unlid_steps(x, y_start, y):
+    """Dock unlidding: home everything, Y to y_start, X to x, Y to y, then home X."""
+    return [('home', ()), ('move', {'y': y_start}), ('move', {'x': x}), ('move', {'y': y}),
+            ('home', ('x',))]
 
 
 def dock_pipes_steps(x, y, z):

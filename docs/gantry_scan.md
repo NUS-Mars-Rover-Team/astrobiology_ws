@@ -113,7 +113,7 @@ ros2 service call /astrobiology/gantry/stop std_srvs/srv/Trigger
 | `/astrobiology/gantry/scan` | `Command` | Starts the full scan (home, 20 points, pictures, back to 0/0/0) in the background. Replies at once: `success`, the CSV path in `message`, and `expected_s` (rough time, not counting homing) |
 | `/astrobiology/gantry/handover` | `Command` | Cache handover: homes all axes, moves X to `handover_x_mm` (53), then Y to `handover_y_mm` (105), then homes Y, then X. Z stays at 0 (clear) throughout. Replies at once; `expected_s` is an upper bound. The log names each step and ends with `cache handover done` |
 | `/astrobiology/gantry/lid` | `Command` | Dock lidding: homes all axes, X to `lid_x_mm` (160), Y to `lid_y_mm` (6), then homes X, then Y. Log: `lidding: ...`, `lidding done` |
-| `/astrobiology/gantry/unlid` | `Command` | Dock unlidding: homes all axes, X to `unlid_x_mm` (160), Y to `unlid_y_mm` (0), then homes X. Log: `unlidding: ...`, `unlidding done`. With Y at 0 after homing, the Y step sends nothing |
+| `/astrobiology/gantry/unlid` | `Command` | Dock unlidding: homes all axes, Y to `unlid_y_start_mm` (6), X to `unlid_x_mm` (160), Y to `unlid_y_mm` (0), then homes X. Log: `unlidding: ...`, `unlidding done` |
 | `/astrobiology/gantry/dock_pipes` | `Command` | Dock pipes: homes all axes, X to `pipes_x_mm` (104), Y to `pipes_y_mm` (1), then Z to `pipes_z_mm` (47). Z stays raised until undocked. **Undock = `gantry/home`**: it homes Z first, so the tray drops off the pipes before X and Y move. Don't jog X/Y while docked: the jogs don't check Z |
 | `/astrobiology/gantry/stop` | `Trigger` | Decelerates X/Y/Z and ends homing, the scan, the handover, lid or unlid. A stopped scan keeps its CSV and needs no re-home (no estop); any other stopped job leaves the position unknown, so home again |
 
@@ -132,7 +132,7 @@ Node parameters:
 | `scan_config` | `''` = the installed `gantry_scan.yaml` | Point it at the source file to try config changes without rebuilding |
 | `scan_dir` | `~/scans` | Where the CSVs go |
 | `handover_x_mm`, `handover_y_mm` | `53.0`, `105.0` | Cache handover position (also in `config/steppers.yaml`). Y 105 is past the scan's `travel_max.y` on purpose |
-| `lid_x_mm`, `lid_y_mm`, `unlid_x_mm`, `unlid_y_mm` | `160.0`, `6.0`, `160.0`, `0.0` | Lid dock positions for `gantry/lid` and `gantry/unlid`. X 160 is past the scan's `travel_max.x` on purpose |
+| `lid_x_mm`, `lid_y_mm`, `unlid_x_mm`, `unlid_y_start_mm`, `unlid_y_mm` | `160.0`, `6.0`, `160.0`, `6.0`, `0.0` | Lid dock positions for `gantry/lid` and `gantry/unlid`. X 160 is past the scan's `travel_max.x` on purpose |
 | `pipes_x_mm`, `pipes_y_mm`, `pipes_z_mm` | `104.0`, `1.0`, `47.0` | Pipe dock position for `gantry/dock_pipes`. Z 47 is past the scan's `travel_max.z` on purpose |
 | `jog_speed_mm_s`, `jog_accel_mm_s2` | `5.0`, `10.0` | Speed of `gantry/{x,y,z}/move` (`MoveAxis`, mm; relative jogs or absolute targets, within 0..`travel_max`) |
 | `position_rate_hz` | `2.0` | How often to poll `pos` for `/astrobiology/gantry/position` (`geometry_msgs/Point`, mm); 0 = off |
