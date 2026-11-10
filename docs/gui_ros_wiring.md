@@ -67,9 +67,9 @@ topic to subscribe to, the request, and what the rover does. Types come from
 | Position X / Y / Z | subscribe `/astrobiology/gantry/position` | as on Imaging | |
 | DOCK / UNDOCK LID (on) | call `/astrobiology/gantry/lid` (`Command`) | empty | Home all, X → 160 mm, Y → 6 mm, home X, home Y |
 | DOCK / UNDOCK LID (off) | call `/astrobiology/gantry/unlid` (`Command`) | empty | Home all, Y → 6 mm, X → 160 mm, Y → 0 mm, home X |
-| DOSING PUMP ON (+ Set DP) | call `/astrobiology/flush/dispense` (`Dispense`) | `{volume_ml: <Set DP>}` | Pumps that volume (firmware `f`), then stops. 0 < volume ≤ 50 mL. Switch the toggle off after `expected_s` |
+| DOSING PUMP ON (+ Set DP) | call `/astrobiology/flush/dispense` (`Dispense`) | `{volume_ml: <Set DP>}` (any value, ignored for now) | Sends the fixed dose `g1 f -100000 30000 5000` (~9 s), then stops. Switch the toggle off after `expected_s` |
 | DOSING PUMP OFF | call `/astrobiology/flush/stop` (`std_srvs/Trigger`) | empty | Stops the dosing pump |
-| EXTRACTION PUMP ON (+ Set EP) | call `/astrobiology/pump/dispense` (`Dispense`) | `{volume_ml: <Set EP>}` | Pumps that volume (firmware `p`), then stops |
+| EXTRACTION PUMP ON (+ Set EP) | call `/astrobiology/pump/dispense` (`Dispense`) | `{volume_ml: <Set EP>}` (any value, ignored for now) | Sends the fixed dose `g1 p -150000 20000 5000` (~11.5 s), then stops |
 | EXTRACTION PUMP OFF | call `/astrobiology/pump/stop` (`std_srvs/Trigger`) | empty | Stops the extraction pump |
 | Carousel ±1° / ±5° / ±60° | call `/astrobiology/carousel/rotate` (`Rotate`) | `{step_deg: <abs>, direction: 0}` for + (CW), `1` for − (CCW) | Steps the carousel at 10 RPM; repeated steps don't drift |
 | DOCK / UNDOCK PIPES (on) | call `/astrobiology/gantry/dock_pipes` (`Command`) | empty | Home all, X → 104 mm, Y → 1 mm, Z → 47 mm (tray raised to the pipes) |

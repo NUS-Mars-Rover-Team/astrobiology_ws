@@ -1,5 +1,6 @@
 """Pump state machine.  No ROS imports — tested with plain pytest."""
 
+import math
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -20,11 +21,24 @@ class PumpConfig:
     direction: str          # 'cw' or 'ccw' (from YAML)
     steps_per_ml: float     # for converting volume_ml -> step count (calibrate)
     max_volume_ml: float
+    default_steps: int = 0  # fixed dose for every request, volume ignored (0 = use volume)
 
     @property
     def direction_sign(self):
         """Return +1 for 'cw', -1 for 'ccw'."""
         return 1 if self.direction == 'cw' else -1
+
+
+def move_time_s(steps, speed, accel):
+    """Time for a trapezoidal move of `steps` (ramp up at accel to speed, then down)."""
+    steps = abs(steps)
+    if steps == 0 or speed <= 0:
+        return 0.0
+    if accel <= 0:
+        return steps / speed
+    if steps >= speed * speed / accel:   # reaches full speed
+        return steps / speed + speed / accel
+    return 2.0 * math.sqrt(steps / accel)  # triangular: never reaches full speed
 
 
 class PumpState:
@@ -42,29 +56,30 @@ class PumpState:
     def dispense(self, volume_ml, now):
         """Try to start a dispense.
 
+        If default_steps > 0, every request sends that fixed dose and volume_ml is ignored.
         Returns (success, message, expected_s).
         On success the caller reads commanded_steps, config.speed_steps_s,
         and config.accel_steps_s2 to build the g1 serial command.
         """
         if self.state == State.DISPENSING:
             return (False, 'busy', 0.0)
-        if volume_ml <= 0.0:
-            return (False, 'out of range', 0.0)
-        if volume_ml > self.config.max_volume_ml:
-            return (False, 'out of range', 0.0)
-
-        steps = int(round(volume_ml * self.config.steps_per_ml))
-        if steps <= 0:
-            return (False, 'out of range', 0.0)
+        if self.config.default_steps > 0:
+            steps = int(self.config.default_steps)
+            what = 'default dose'
+        else:
+            if volume_ml <= 0.0 or volume_ml > self.config.max_volume_ml:
+                return (False, 'out of range', 0.0)
+            steps = int(round(volume_ml * self.config.steps_per_ml))
+            if steps <= 0:
+                return (False, 'out of range', 0.0)
+            what = f'{volume_ml:.2f} ml'
 
         self._commanded_steps = self.config.direction_sign * steps
-
-        # Estimate run time (ignoring accel/decel ramps)
-        time_s = steps / self.config.speed_steps_s
+        time_s = move_time_s(steps, self.config.speed_steps_s, self.config.accel_steps_s2)
 
         self.state = State.DISPENSING
         self._finish_time = now + time_s + SAFETY_TIMEOUT_MARGIN_S
-        return (True, f'dispensing {volume_ml:.2f} ml ({steps} steps)', time_s)
+        return (True, f'dispensing {what} ({steps} steps)', time_s)
 
     def stop(self):
         """Force-stop.  Always succeeds."""

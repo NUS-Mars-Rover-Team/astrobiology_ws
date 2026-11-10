@@ -99,15 +99,15 @@ Run a peristaltic pump for a set volume. No flow sensor: run time = volume / cal
 
 | | Field | Type | Description |
 |---|-------|------|-------------|
-| **Req** | `volume_ml` | `float32` | Volume to dispense |
+| **Req** | `volume_ml` | `float32` | Volume to dispense; ignored while the pump's `default_pulses` > 0 (fixed dose) |
 | **Res** | `success` | `bool` | Accepted (not finished) |
 | **Res** | `message` | `string` | Reason if rejected |
 | **Res** | `expected_s` | `float32` | Estimated time to finish; 0 if rejected |
 
-Servers: `/astrobiology/pump/dispense` (extraction, firmware `p`), `/astrobiology/flush/dispense` (dosing, firmware `f`) (`steppers_node`; volume → pulses via the `pulses_per_ml` parameter; stop early with `pump/stop` / `flush/stop`)
+Servers: `/astrobiology/pump/dispense` (extraction, firmware `p`), `/astrobiology/flush/dispense` (dosing, firmware `f`) (`steppers_node`; fixed `default_pulses` dose for now, else volume → pulses via `pulses_per_ml`; stop early with `pump/stop` / `flush/stop`)
 
 ```bash
-# Dispense 5 mL with the dosing pump (flush)
+# Dosing pump (flush); for now any volume sends the fixed dose g1 f -100000 30000 5000
 ros2 service call /astrobiology/flush/dispense \
   astrobiology_interfaces/srv/Dispense \
   "{volume_ml: 5.0}"

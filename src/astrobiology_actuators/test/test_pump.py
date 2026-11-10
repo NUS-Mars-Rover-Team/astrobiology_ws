@@ -1,13 +1,16 @@
 import pytest
 
-from astrobiology_actuators.pump import PumpConfig, PumpState, State, SAFETY_TIMEOUT_MARGIN_S
+from astrobiology_actuators.pump import (
+    PumpConfig, PumpState, State, SAFETY_TIMEOUT_MARGIN_S, move_time_s,
+)
 
 
 @pytest.fixture
 def config():
-    # speed=5000 steps/s, steps_per_ml=1000 → 1 ml = 1000 steps
+    # speed=5000 steps/s, accel=5000 steps/s², steps_per_ml=1000 → 1 ml = 1000 steps.
+    # Full speed is reached after 5000 steps of ramp (2500 up + 2500 down).
     return PumpConfig(
-        pump_id=1, motor_name='pump', speed_steps_s=5000, accel_steps_s2=400,
+        pump_id=1, motor_name='pump', speed_steps_s=5000, accel_steps_s2=5000,
         direction='cw', steps_per_ml=1000.0, max_volume_ml=20.0,
     )
 
@@ -22,16 +25,16 @@ def pump(config):
 def test_dispense_success(pump):
     ok, msg, expected_s = pump.dispense(5.0, now=0.0)
     assert ok is True
-    # 5 ml * 1000 steps/ml / 5000 steps/s = 1.0 s
-    assert expected_s == pytest.approx(1.0)
+    # 5000 steps: 5000/5000 + ramps 5000/5000 = 2.0 s
+    assert expected_s == pytest.approx(2.0)
     assert pump.is_busy
 
 
 def test_dispense_expected_s(pump):
     ok, _, expected_s = pump.dispense(10.0, now=0.0)
     assert ok is True
-    # 10 ml * 1000 / 5000 = 2.0 s
-    assert expected_s == pytest.approx(2.0)
+    # 10000 steps: 10000/5000 + 5000/5000 = 3.0 s
+    assert expected_s == pytest.approx(3.0)
 
 
 def test_dispense_computes_steps(pump):
@@ -95,8 +98,8 @@ def test_dispense_busy_self(pump):
 # -- Timer-based safety timeout ----------------------------------------------
 
 def test_tick_completes(pump):
-    pump.dispense(5.0, now=0.0)  # expected_s = 1.0, timeout = 1.0 + margin
-    timeout = 1.0 + SAFETY_TIMEOUT_MARGIN_S
+    pump.dispense(5.0, now=0.0)  # expected_s = 2.0, timeout = 2.0 + margin
+    timeout = 2.0 + SAFETY_TIMEOUT_MARGIN_S
     pump.tick(now=timeout - 0.1)
     assert pump.is_busy
     pump.tick(now=timeout)
@@ -153,3 +156,39 @@ def test_dispense_after_complete(pump):
     pump.complete()
     ok, _, _ = pump.dispense(3.0, now=1.0)
     assert ok is True
+
+
+# -- Default dose and ramp timing --------------------------------------------
+
+def _cfg(**kw):
+    base = dict(pump_id=1, motor_name='f', speed_steps_s=30000, accel_steps_s2=5000,
+                direction='ccw', steps_per_ml=1000.0, max_volume_ml=50.0,
+                default_steps=100000)
+    base.update(kw)
+    return PumpConfig(**base)
+
+
+def test_default_dose_when_no_volume():
+    p = PumpState(_cfg())
+    ok, msg, expected_s = p.dispense(0.0, now=0.0)
+    assert ok and p.commanded_steps == -100000
+    assert 'default dose' in msg
+    # never reaches 30000/s in 100000 steps: 2*sqrt(100000/5000)
+    assert expected_s == pytest.approx(2 * 20 ** 0.5)
+
+
+def test_default_dose_ignores_volume():
+    p = PumpState(_cfg())
+    ok, _, _ = p.dispense(2.0, now=0.0)
+    assert ok and p.commanded_steps == -100000
+
+
+def test_no_default_dose_refuses_zero():
+    p = PumpState(_cfg(default_steps=0))
+    ok, msg, _ = p.dispense(0.0, now=0.0)
+    assert not ok and msg == 'out of range'
+
+
+def test_move_time_trapezoid():
+    # pump: 150000 steps at 20000/s, 5000/s²: 7.5 s cruise-equivalent + 4 s of ramps
+    assert move_time_s(150000, 20000, 5000) == pytest.approx(11.5)

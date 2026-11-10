@@ -15,6 +15,7 @@ stops publishing after an estop or an ESP32 restart, until home is called again.
 The two peristaltic pumps, pump (p, extraction) and flush (f, dosing), also take a
 volume: /astrobiology/<pump|flush>/dispense (Dispense) pumps volume_ml using that
 pump's pulses_per_ml parameter and stops by itself; <pump|flush>/stop ends it early.
+While a pump's default_pulses > 0, every request sends that fixed dose (volume_ml ignored).
 
 gantry/{x,y,z}/move use MoveAxis in mm: relative (jog by position_mm) or absolute
 (go to position_mm).  The axis must be homed and the target within 0..travel_max
@@ -98,6 +99,7 @@ PUMP_DEFAULTS = {
     'accel_hz2': 400,
     'direction': 'cw',         # 'ccw' reverses the pump
     'max_ml': 50.0,
+    'default_pulses': 0,       # fixed dose for every dispense, volume ignored (0 = use volume_ml)
 }
 
 # Firmware feedback patterns
@@ -409,6 +411,7 @@ class SteppersNode(Node):
             speed_steps_s=int(value('speed_hz')), accel_steps_s2=int(value('accel_hz2')),
             direction=value('direction'), steps_per_ml=float(value('pulses_per_ml')),
             max_volume_ml=float(value('max_ml')),
+            default_steps=int(value('default_pulses')),
         )
 
     def _on_dispense(self, req, resp, motor):

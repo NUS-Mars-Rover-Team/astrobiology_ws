@@ -256,8 +256,8 @@ while gantry homing, the scan or the handover runs. Different axes can move at t
 | `/astrobiology/pump/stop` | Trigger | Stop pump |
 | `/astrobiology/flush/move` | StepperMove | Flush pump |
 | `/astrobiology/flush/stop` | Trigger | Stop flush |
-| `/astrobiology/pump/dispense` | Dispense | Extraction pump: pump `volume_ml`, then stop (`pump/stop` ends it early) |
-| `/astrobiology/flush/dispense` | Dispense | Dosing pump: pump `volume_ml`, then stop (`flush/stop` ends it early) |
+| `/astrobiology/pump/dispense` | Dispense | Extraction pump: any request sends the fixed dose `g1 p -150000 20000 5000`, then stops (`pump/stop` ends it early) |
+| `/astrobiology/flush/dispense` | Dispense | Dosing pump: any request sends the fixed dose `g1 f -100000 30000 5000`, then stops (`flush/stop` ends it early) |
 | `/astrobiology/centrifuge/move` | StepperMove | Centrifuge motor (revolutions, RPM, RPM/s) |
 | `/astrobiology/centrifuge/stop` | Trigger | Stop centrifuge (ends a spin or carousel step) |
 | `/astrobiology/centrifuge/spin` | Spin | Spin at `rpm` for `duration_s`, then stop |
@@ -295,15 +295,17 @@ while gantry homing, the scan or the handover runs. Different axes can move at t
 **extraction pump**, `flush` (firmware `f`) is the **dosing pump**.
 
 ```bash
-ros2 service call /astrobiology/flush/dispense astrobiology_interfaces/srv/Dispense "{volume_ml: 5.0}"   # dosing
+ros2 service call /astrobiology/flush/dispense astrobiology_interfaces/srv/Dispense "{volume_ml: 5.0}"   # dosing: g1 f -100000 30000 5000
 ros2 service call /astrobiology/flush/stop std_srvs/srv/Trigger
-ros2 service call /astrobiology/pump/dispense astrobiology_interfaces/srv/Dispense "{volume_ml: 5.0}"    # extraction
+ros2 service call /astrobiology/pump/dispense astrobiology_interfaces/srv/Dispense "{volume_ml: 5.0}"    # extraction: g1 p -150000 20000 5000
 ```
 
-- The reply comes at once (`dispensing 5.00 ml (5000 steps)`, `expected_s`); the pump stops by
+- The reply comes at once (`dispensing default dose (100000 steps)`, `expected_s`); the pump stops by
   itself after the volume. A second dispense on the same pump is refused (`busy`) until the
   ESP32 reports `done`, as is a dispense while a raw `pump/move` / `flush/move` runs.
-- Volumes must be more than 0 and at most `max_ml` (50 mL).
+- For now every request sends the fixed `default_pulses` dose at `speed_hz` / `accel_hz2`
+  (in `config/steppers.yaml`); `volume_ml` is ignored. Set `default_pulses: 0` to dispense
+  `volume_ml` instead (more than 0, at most `max_ml`). `expected_s` includes the accel/decel ramps.
 - Settings per pump in `config/steppers.yaml` (`pump.*`, `flush.*`):
   `pulses_per_ml`, `speed_hz` (800), `accel_hz2` (400), `direction` (`cw`/`ccw`), `max_ml`.
 - **`pulses_per_ml` is a placeholder (1000) until calibrated.** In picocom run e.g.

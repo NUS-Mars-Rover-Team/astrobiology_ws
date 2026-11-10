@@ -29,22 +29,27 @@ steppers_node:
     # gantry/{x,y,z}/move (MoveAxis, mm): jog speed and acceleration
     jog_speed_mm_s: 5.0
     jog_accel_mm_s2: 10.0
-    # Dispensing pumps (/astrobiology/<pump|flush>/dispense, volume_ml):
+    # Dispensing pumps (/astrobiology/<pump|flush>/dispense):
     # pump = extraction (firmware p), flush = dosing (firmware f).
-    # pulses_per_ml is a PLACEHOLDER (TODO: calibrate).  Calibrate: in picocom run e.g.
-    # "g1 f 3200 800 400" into a measuring cylinder; pulses_per_ml = 3200 / mL collected.
-    # direction: cw | ccw.
+    # For now every dispense request (any volume_ml, or "{}") sends the fixed default_pulses dose:
+    #   flush -> g1 f -100000 30000 5000      pump -> g1 p -150000 20000 5000
+    # Set default_pulses: 0 to dispense volume_ml * pulses_per_ml instead (same speed/accel).
+    # pulses_per_ml is a PLACEHOLDER (TODO: calibrate): run the default dose into a
+    # measuring cylinder; pulses_per_ml = default_pulses / mL collected.
+    # direction: cw | ccw (ccw = negative distance).
     flush:
+      default_pulses: 100000
       pulses_per_ml: 1000.0
-      speed_hz: 800
-      accel_hz2: 400
-      direction: cw
+      speed_hz: 30000
+      accel_hz2: 5000
+      direction: ccw
       max_ml: 50.0
     pump:
+      default_pulses: 150000
       pulses_per_ml: 1000.0
-      speed_hz: 800
-      accel_hz2: 400
-      direction: cw
+      speed_hz: 20000
+      accel_hz2: 5000
+      direction: ccw
       max_ml: 50.0
     # Centrifuge (/astrobiology/centrifuge/spin: rpm for duration_s) on firmware motor c
     centrifuge:
@@ -55,5 +60,9 @@ steppers_node:
       allowed_steps_deg: [1.0, 5.0, 60.0]
       speed_rpm: 10.0
       accel_rpm_s: 20.0
-      gear_ratio: 1.0        # motor revolutions per carousel revolution
+      # Motor revolutions per carousel revolution.  2.0 for now: the centrifuge driver
+      # microsteps at twice what the firmware assumes (1600 steps/rev), so each firmware
+      # "rev" only turns the motor half a turn.  Set back to 1.0 once the firmware's
+      # steps/unit for c matches the driver.
+      gear_ratio: 2.0
       cw_positive: true      # false if CW turns the carousel the wrong way
