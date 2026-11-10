@@ -484,3 +484,14 @@ def test_estimate_sequence_s():
                 + 6 / gantry_scan.HOME_FAST_MM_S + gantry_scan.HOME_TOUCH_S)    # home Y
     assert gantry_scan.estimate_sequence_s(cfg, gantry_scan.lid_steps(160.0, 6.0)) \
         == pytest.approx(expected)
+
+
+def test_dock_pipes_sequence():
+    gantry = FakeGantry()
+    steps = gantry_scan.dock_pipes_steps(104.0, 1.0, 47.0)
+    gantry_scan.run_sequence(gantry, 'pipe docking', steps, log=lambda m: None)
+    assert gantry.calls == [
+        ('home',), ('move', {'x': 104.0}), ('move', {'y': 1.0}), ('move', {'z': 47.0}),
+    ]
+    assert gantry.position == {'x': 104.0, 'y': 1.0, 'z': 47.0}
+    assert gantry_scan.describe_steps(steps) == 'home all, X to 104 mm, Y to 1 mm, Z to 47 mm'

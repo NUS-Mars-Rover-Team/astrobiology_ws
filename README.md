@@ -204,6 +204,7 @@ ros2 service call /astrobiology/gantry/scan astrobiology_interfaces/srv/Command
 ros2 service call /astrobiology/gantry/handover astrobiology_interfaces/srv/Command
 ros2 service call /astrobiology/gantry/lid astrobiology_interfaces/srv/Command     # dock lidding
 ros2 service call /astrobiology/gantry/unlid astrobiology_interfaces/srv/Command   # dock unlidding
+ros2 service call /astrobiology/gantry/dock_pipes astrobiology_interfaces/srv/Command   # dock pipes (undock: gantry/home)
 ros2 service call /astrobiology/gantry/stop std_srvs/srv/Trigger
 ```
 
@@ -279,6 +280,7 @@ while gantry homing, the scan or the handover runs. Different axes can move at t
 | `/astrobiology/gantry/handover` | Command | Cache handover: home all, X to 53, Y to 105, home Y, home X (`steppers_node`); replies at once |
 | `/astrobiology/gantry/lid` | Command | Dock lidding: home all, X to 160, Y to 6, home X, home Y; replies at once |
 | `/astrobiology/gantry/unlid` | Command | Dock unlidding: home all, X to 160, Y to 0, home X; replies at once |
+| `/astrobiology/gantry/dock_pipes` | Command | Dock pipes: home all, X to 104, Y to 1, Z to 47 (undock: `gantry/home`); replies at once |
 | `/astrobiology/gantry/stop` | Trigger | Stop gantry homing, the scan, the handover or lid docking (decelerates X/Y/Z) |
 | `/spectro/spectrum_node/set_zero_reference` | Trigger | Snapshot the current spectrum as the blank (I0) |
 | `/spectro/spectrum_node/clear_zero_reference` | Trigger | Clear the blank; back to raw spectra |

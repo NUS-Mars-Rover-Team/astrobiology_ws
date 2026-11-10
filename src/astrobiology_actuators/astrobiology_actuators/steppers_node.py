@@ -22,10 +22,11 @@ gantry/{x,y,z}/move use MoveAxis in mm: relative (jog by position_mm) or absolut
 
 It also runs gantry jobs in the background, sharing this node's serial port:
 /astrobiology/gantry/home homes Z, Y, X; /astrobiology/gantry/scan runs the
-grid scan (gantry_scan.py); /astrobiology/gantry/handover, lid and unlid run
-the cache handover and the lid docking sequences (home, X out, Y out, re-home;
-see SEQUENCES); /astrobiology/gantry/stop ends any of them.  Gantry move
-services are rejected while a job runs.
+grid scan (gantry_scan.py); /astrobiology/gantry/handover, lid, unlid and
+dock_pipes run the cache handover, lid docking and pipe docking sequences
+(home, then moves and re-homes; see SEQUENCES); /astrobiology/gantry/stop ends
+any of them.  Undocking the pipes is gantry/home.  Gantry move services are
+rejected while a job runs.
 
 /astrobiology/gantry/position (geometry_msgs/Point, mm) publishes the gantry
 X/Y/Z from every position the ESP32 reports; the node asks for it with 'pos'
@@ -79,12 +80,14 @@ MOTORS = {
 }
 GANTRY = ('gantry/x', 'gantry/y', 'gantry/z')
 
-# Gantry sequences: job -> (steps(x, y), x parameter, y parameter, name in the log).
+# Gantry sequences: job -> (steps(*positions), position parameters, name in the log).
 # Each homes everything first; the positions are parameters (steppers.yaml).
 SEQUENCES = {
-    'handover': (gs.handover_steps, 'handover_x_mm', 'handover_y_mm', 'cache handover'),
-    'lid': (gs.lid_steps, 'lid_x_mm', 'lid_y_mm', 'lidding'),
-    'unlid': (gs.unlid_steps, 'unlid_x_mm', 'unlid_y_mm', 'unlidding'),
+    'handover': (gs.handover_steps, ('handover_x_mm', 'handover_y_mm'), 'cache handover'),
+    'lid': (gs.lid_steps, ('lid_x_mm', 'lid_y_mm'), 'lidding'),
+    'unlid': (gs.unlid_steps, ('unlid_x_mm', 'unlid_y_mm'), 'unlidding'),
+    'dock_pipes': (gs.dock_pipes_steps, ('pipes_x_mm', 'pipes_y_mm', 'pipes_z_mm'),
+                   'pipe docking'),
 }
 
 # Dispensing pumps: MOTORS key -> role on the rover, and their parameters
@@ -124,6 +127,9 @@ class SteppersNode(Node):
         self.declare_parameter('lid_y_mm', 6.0)
         self.declare_parameter('unlid_x_mm', 160.0)       # dock unlidding position
         self.declare_parameter('unlid_y_mm', 0.0)
+        self.declare_parameter('pipes_x_mm', 104.0)       # pipe docking position
+        self.declare_parameter('pipes_y_mm', 1.0)
+        self.declare_parameter('pipes_z_mm', 47.0)
         self.declare_parameter('jog_speed_mm_s', 5.0)     # gantry/{x,y,z}/move
         self.declare_parameter('jog_accel_mm_s2', 10.0)
         # Centrifuge / carousel (firmware motor c, revolutions and RPM)
@@ -481,15 +487,16 @@ class SteppersNode(Node):
         return resp
 
     def _on_sequence(self, req, resp, job):
-        steps_for, x_param, y_param, name = SEQUENCES[job]
+        steps_for, params, name = SEQUENCES[job]
         resp.success = False
         resp.expected_s = 0.0
-        x = float(self.get_parameter(x_param).value)
-        y = float(self.get_parameter(y_param).value)
-        if x < 0 or y < 0:
-            resp.message = f'{name} position x={x:g}, y={y:g} is behind the endstops'
+        positions = [float(self.get_parameter(p).value) for p in params]
+        if any(mm < 0 for mm in positions):
+            resp.message = (f'{name} position '
+                            + ', '.join(f'{p}={mm:g}' for p, mm in zip(params, positions))
+                            + ' is behind the endstops')
             return resp
-        steps = steps_for(x, y)
+        steps = steps_for(*positions)
         if not self._start_gantry_job(job, self._sequence, (name, steps), resp):
             return resp
         try:   # the scan config's travel limits bound the first homing
@@ -506,7 +513,8 @@ class SteppersNode(Node):
         job = self._gantry_job
         if job is None:
             resp.success = False
-            resp.message = 'no gantry job (homing, scan, handover, lid, unlid) in progress'
+            resp.message = ('no gantry job (homing, scan, handover, lid, unlid, dock_pipes) '
+                            'in progress')
             return resp
         self._gantry_stop.set()
         for axis in 'xyz':

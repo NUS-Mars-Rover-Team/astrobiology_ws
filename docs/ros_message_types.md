@@ -150,7 +150,7 @@ A command with no arguments that takes time to finish.
 | **Res** | `message` | `string` | Reason if rejected |
 | **Res** | `expected_s` | `float32` | Estimated time to finish; 0 if rejected |
 
-Servers: `/astrobiology/gantry/home`, `/astrobiology/gantry/scan`, `/astrobiology/gantry/handover`, `/astrobiology/gantry/lid`, `/astrobiology/gantry/unlid` (`steppers_node`)
+Servers: `/astrobiology/gantry/home`, `/astrobiology/gantry/scan`, `/astrobiology/gantry/handover`, `/astrobiology/gantry/lid`, `/astrobiology/gantry/unlid`, `/astrobiology/gantry/dock_pipes` (`steppers_node`)
 
 ```bash
 # Home the gantry (Z, then Y, then X)

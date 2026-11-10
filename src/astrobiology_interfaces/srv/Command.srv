@@ -1,6 +1,7 @@
 # A command with no arguments that takes time to finish.
 # Servers: /astrobiology/gantry/home, /astrobiology/gantry/scan, /astrobiology/gantry/handover,
-#          /astrobiology/gantry/lid, /astrobiology/gantry/unlid  [steppers_node]
+#          /astrobiology/gantry/lid, /astrobiology/gantry/unlid,
+#          /astrobiology/gantry/dock_pipes  [steppers_node]
 ---
 bool    success         # accepted, not finished
 string  message         # reason if rejected

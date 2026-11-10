@@ -620,6 +620,11 @@ def unlid_steps(x, y):
     return [('home', ()), ('move', {'x': x}), ('move', {'y': y}), ('home', ('x',))]
 
 
+def dock_pipes_steps(x, y, z):
+    """Dock the pipes: home everything, X to x, Y to y, then Z to z (undock = home all)."""
+    return [('home', ()), ('move', {'x': x}), ('move', {'y': y}), ('move', {'z': z})]
+
+
 def step_label(step):
     kind, arg = step
     if kind == 'home':

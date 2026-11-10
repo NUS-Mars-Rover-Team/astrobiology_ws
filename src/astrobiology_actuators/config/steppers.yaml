@@ -18,6 +18,12 @@ steppers_node:
     lid_y_mm: 6.0
     unlid_x_mm: 160.0
     unlid_y_mm: 0.0
+    # Dock pipes (/astrobiology/gantry/dock_pipes): home all, X, then Y, then Z go here (mm).
+    # Z stays raised at pipes_z_mm until undocked; undock = /astrobiology/gantry/home
+    # (it homes Z first, so the tray drops off the pipes before X and Y move).
+    pipes_x_mm: 104.0
+    pipes_y_mm: 1.0
+    pipes_z_mm: 47.0
     # gantry/{x,y,z}/move (MoveAxis, mm): jog speed and acceleration
     jog_speed_mm_s: 5.0
     jog_accel_mm_s2: 10.0

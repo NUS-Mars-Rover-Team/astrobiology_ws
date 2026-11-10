@@ -72,7 +72,8 @@ topic to subscribe to, the request, and what the rover does. Types come from
 | EXTRACTION PUMP ON (+ Set EP) | call `/astrobiology/pump/dispense` (`Dispense`) | `{volume_ml: <Set EP>}` | Pumps that volume (firmware `p`), then stops |
 | EXTRACTION PUMP OFF | call `/astrobiology/pump/stop` (`std_srvs/Trigger`) | empty | Stops the extraction pump |
 | Carousel ±1° / ±5° / ±60° | call `/astrobiology/carousel/rotate` (`Rotate`) | `{step_deg: <abs>, direction: 0}` for + (CW), `1` for − (CCW) | Steps the carousel at 10 RPM; repeated steps don't drift |
-| DOCK / UNDOCK PIPES | — | | Not wired: sequence not defined yet |
+| DOCK / UNDOCK PIPES (on) | call `/astrobiology/gantry/dock_pipes` (`Command`) | empty | Home all, X → 104 mm, Y → 1 mm, Z → 47 mm (tray raised to the pipes) |
+| DOCK / UNDOCK PIPES (off) | call `/astrobiology/gantry/home` (`Command`) | empty | Homes Z first (tray drops off the pipes), then Y, then X |
 | SHAKE & MIX CACHE | — | | Not wired: sequence not defined yet |
 | Enclosure, Carousel cameras | — | | No camera topics from `astrobiology_ws` |
 
@@ -95,7 +96,7 @@ Pump volumes use a placeholder calibration (1000 pulses per mL) until it is meas
 
 ## Every tab
 
-- **Shared hardware refuses overlapping work.** Gantry home, scan, handover, lid and unlid block
+- **Shared hardware refuses overlapping work.** Gantry home, scan, handover, lid, unlid and dock_pipes block
   each other and the jogs. The centrifuge spin and carousel steps share one motor. A refused call
   returns `success: false` with `busy: …` and sends nothing.
 - **`/astrobiology/gantry/stop`** (`std_srvs/Trigger`) stops any running gantry job; no button yet.
@@ -110,7 +111,7 @@ Pump volumes use a placeholder calibration (1000 pulses per mL) until it is meas
 
 | Service | Type |
 |---|---|
-| `/astrobiology/gantry/home`, `scan`, `handover`, `lid`, `unlid` | `Command` |
+| `/astrobiology/gantry/home`, `scan`, `handover`, `lid`, `unlid`, `dock_pipes` | `Command` |
 | `/astrobiology/gantry/stop` | `std_srvs/Trigger` |
 | `/astrobiology/gantry/{x,y,z}/move` | `MoveAxis` |
 | `/astrobiology/gantry/{x,y,z}/stop` | `std_srvs/Trigger` |
