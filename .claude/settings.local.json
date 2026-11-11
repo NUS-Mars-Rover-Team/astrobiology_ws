@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest src/astrobiology_actuators/test/ -v)"
+    ]
+  }
+}

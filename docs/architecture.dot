@@ -18,7 +18,7 @@ digraph astrobiology {
     // ── Hardware ──────────────────────────────────────────────
     node [shape=box3d, style=filled, fillcolor="#FFE0B2"];
     esp_steppers  [label="ESP32 stepper controller\nSixMotorController.ino\npump, flush, centrifuge, x, y, z"];
-    esp_lights    [label="Arduino lights\nLEDdrill.ino\nUVM, UVC, laser, halogen"];
+    nano_lights   [label="Arduino Nano\nLEDdrill.ino\nUVM, UVC, laser, halogen"];
     arduino_drill [label="Arduino drill\nLAdrill.ino"];
     btc100        [label="B&W Tek BTC100\nRaman spectrometer"];
     spectro_cam   [label="Sonix spectroscope\ncamera"];
@@ -85,7 +85,7 @@ digraph astrobiology {
     // ── Hardware -> nodes (serial / V4L2) ─────────────────────
     edge [color="#E65100", style=bold];
     esp_steppers  -> steppers_node [label="/dev/esp_steppers\n115200, g1"];
-    esp_lights    -> lights_node   [label="/dev/esp_lights\n9600"];
+    nano_lights    -> lights_node   [label="/dev/nano_lights\n9600"];
     arduino_drill -> drill_node    [label="/dev/uno_drill\n9600"];
     btc100        -> raman_node    [label="/dev/raman_spectroscope\n115200"];
     spectro_cam   -> spectrum_node [label="/dev/spectroscope\nV4L2"];
