@@ -25,7 +25,7 @@ class LightsNode(Node):
     def __init__(self):
         super().__init__('lights_node')
 
-        self.declare_parameter('port', '/dev/esp_lights')
+        self.declare_parameter('port', '/dev/nano_lights')
         self.declare_parameter('baud', 9600)
         self.declare_parameter('dry_run', False)
 

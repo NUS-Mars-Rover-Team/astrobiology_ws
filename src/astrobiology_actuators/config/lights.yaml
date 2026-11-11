@@ -1,6 +1,6 @@
 # Science lights node parameters (Arduino running firmware/LEDdrill.ino).
 lights_node:
   ros__parameters:
-    port: /dev/esp_lights
+    port: /dev/nano_lights
     baud: 9600
     dry_run: false
