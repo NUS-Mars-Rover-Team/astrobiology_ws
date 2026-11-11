@@ -32,5 +32,7 @@ def generate_launch_description():
 
         _include('astrobiology_actuators', 'steppers.launch.py', dry_run=dry_run),
         _include('astrobiology_actuators', 'lights.launch.py', dry_run=dry_run),
+        _include('astrobiology_actuators', 'drill.launch.py', dry_run=dry_run),
+        _include('raman_spectrometer', 'raman.launch.py'),
         _include('spectro_cam', 'spectro_cam.launch.py'),
     ])

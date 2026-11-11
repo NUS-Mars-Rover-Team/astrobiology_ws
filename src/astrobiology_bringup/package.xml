@@ -11,6 +11,7 @@
   <depend>astrobiology_msgs</depend>
   <exec_depend>astrobiology_actuators</exec_depend>
   <exec_depend>spectro_cam</exec_depend>
+  <exec_depend>raman_spectrometer</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
